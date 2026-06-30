@@ -1,0 +1,20 @@
+{
+  "name": "iso-shooter",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "workspaces": ["packages/shared", "packages/server", "packages/client"],
+  "scripts": {
+    "build": "tsc -b packages/shared packages/server",
+    "watch": "tsc -b -w packages/shared packages/server",
+    "test:netcode": "npm run build && node packages/server/dist/headlessProof.js",
+    "server": "node packages/server/dist/main.js",
+    "client": "vite packages/client",
+    "typecheck": "tsc -b packages/shared packages/server packages/client"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.4",
+    "vite": "^5.4.0",
+    "@types/ws": "^8.5.12"
+  }
+}
