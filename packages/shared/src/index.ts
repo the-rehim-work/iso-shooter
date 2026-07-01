@@ -4,6 +4,8 @@ export * from './sim/movement.js';
 export * from './sim/prediction.js';
 export * from './sim/interpolation.js';
 export * from './sim/weapon.js';
+export * from './sim/weapons.js';
+export * from './sim/maps.js';
 export * from './ecs/components.js';
 export * from './ecs/world.js';
 export * from './ecs/queries.js';

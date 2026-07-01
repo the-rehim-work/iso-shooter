@@ -15,6 +15,11 @@ export interface InputCommand {
   dt: number;
   fire: boolean;
   reload: boolean;
+  switchTo: number;
+  interact: boolean;
+  throwType: number;
+  throwX: number;
+  throwZ: number;
 }
 
 function clamp(v: number, lo: number, hi: number): number {
@@ -27,10 +32,10 @@ function normalizedDir(mx: number, mz: number): { dx: number; dz: number } {
   return { dx: 0, dz: 0 };
 }
 
-export function integrate(state: MoveState, input: InputCommand): MoveState {
+export function integrate(state: MoveState, input: InputCommand, moveSpeed = MOVE_SPEED): MoveState {
   const { dx, dz } = normalizedDir(input.moveX, input.moveZ);
-  const nx = clamp(state.x + dx * MOVE_SPEED * input.dt, -ARENA_HALF_X, ARENA_HALF_X);
-  const nz = clamp(state.z + dz * MOVE_SPEED * input.dt, -ARENA_HALF_Z, ARENA_HALF_Z);
+  const nx = clamp(state.x + dx * moveSpeed * input.dt, -ARENA_HALF_X, ARENA_HALF_X);
+  const nz = clamp(state.z + dz * moveSpeed * input.dt, -ARENA_HALF_Z, ARENA_HALF_Z);
   return { x: nx, z: nz, yaw: input.aimYaw };
 }
 
@@ -39,10 +44,11 @@ export function integrateWithCollision(
   input: InputCommand,
   netId: number,
   cw: CollisionWorld,
+  moveSpeed = MOVE_SPEED,
 ): MoveState {
   const { dx, dz } = normalizedDir(input.moveX, input.moveZ);
-  const wantDx = dx * MOVE_SPEED * input.dt;
-  const wantDz = dz * MOVE_SPEED * input.dt;
+  const wantDx = dx * moveSpeed * input.dt;
+  const wantDz = dz * moveSpeed * input.dt;
   const resolved = cw.resolveMovement(netId, state.x, state.z, wantDx, wantDz);
   return { x: state.x + resolved.dx, z: state.z + resolved.dz, yaw: input.aimYaw };
 }

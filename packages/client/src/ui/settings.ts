@@ -1,10 +1,14 @@
-﻿export interface SettingsOptions {
+﻿export type DifficultyOpt = 'easy' | 'normal' | 'hard';
+
+export interface SettingsOptions {
   initialVolume: number;
   initialLatency: number;
   initialName: string;
+  initialDifficulty: DifficultyOpt;
   onVolumeChange(v: number): void;
   onLatencyChange(ms: number): void;
   onNameChange(name: string): void;
+  onDifficultyChange(d: DifficultyOpt): void;
 }
 
 function el(tag: string, css: Partial<CSSStyleDeclaration>, attrs: Record<string, string> = {}): HTMLElement {
@@ -40,7 +44,7 @@ export class SettingsPanel {
     this.btn = document.createElement('button');
     this.btn.textContent = '⚙';
     Object.assign(this.btn.style, {
-      position: 'fixed', bottom: '14px', right: '14px', zIndex: '200',
+      position: 'fixed', top: '12px', right: '12px', zIndex: '200',
       width: '38px', height: '38px', borderRadius: '8px',
       border: '1px solid #555', background: 'rgba(24,26,32,0.92)',
       color: '#ccc', fontSize: '18px', cursor: 'pointer', lineHeight: '1',
@@ -89,6 +93,21 @@ export class SettingsPanel {
     nameInput.addEventListener('input', () => opts.onNameChange(nameInput.value.trim()));
     this.panel.appendChild(nameInput);
 
+    section('BOTS');
+    const diffSelect = document.createElement('select');
+    Object.assign(diffSelect.style, {
+      background: '#1a1c22', border: '1px solid #444', borderRadius: '5px',
+      color: '#eee', padding: '6px 8px', fontSize: '12px', fontFamily: 'monospace', cursor: 'pointer',
+    });
+    for (const d of ['easy', 'normal', 'hard'] as const) {
+      const o = document.createElement('option');
+      o.value = d; o.textContent = d.toUpperCase();
+      if (d === opts.initialDifficulty) o.selected = true;
+      diffSelect.appendChild(o);
+    }
+    diffSelect.addEventListener('change', () => opts.onDifficultyChange(diffSelect.value as DifficultyOpt));
+    this.panel.appendChild(row('Difficulty', diffSelect));
+
     section('AUDIO');
     const volSlider = sliderEl(0, 100, Math.round(opts.initialVolume * 100));
     const volLabel = el('span', { color: '#eee', fontSize: '12px', minWidth: '32px', textAlign: 'right' });
@@ -118,6 +137,8 @@ export class SettingsPanel {
     section('CONTROLS');
     const controls: [string, string][] = [
       ['WASD', 'Move'], ['Mouse', 'Aim'], ['LClick', 'Fire'], ['R', 'Reload'],
+      ['1 / 2', 'Weapon'], ['Q / Wheel', 'Swap'], ['3 / 4 / 5', 'Frag/Molo/Smoke'],
+      ['E', 'Interact'], ['C', 'Class'], ['T', 'Switch team'], ['Tab', 'Scores'],
     ];
     for (const [key, action] of controls) {
       const r2 = el('div', { display: 'flex', justifyContent: 'space-between', marginBottom: '8px' });

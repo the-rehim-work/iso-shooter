@@ -1,5 +1,6 @@
 import RAPIER from '@dimforge/rapier2d-compat';
-import { ARENA_HALF_X, ARENA_HALF_Z, STATIC_COVER, PLAYER_RADIUS } from '../constants.js';
+import { ARENA_HALF_X, ARENA_HALF_Z, PLAYER_RADIUS } from '../constants.js';
+import { DEFAULT_MAP, type GameMap } from './maps.js';
 
 let initialized = false;
 
@@ -15,12 +16,16 @@ export class CollisionWorld {
   private bodies = new Map<number, RAPIER.RigidBody>();
   private colliders = new Map<number, RAPIER.Collider>();
   private colliderHandleToNetId = new Map<number, number>();
+  private doorColliders: RAPIER.Collider[] = [];
+  readonly map: GameMap;
 
-  constructor() {
+  constructor(map: GameMap = DEFAULT_MAP) {
+    this.map = map;
     this.world = new RAPIER.World({ x: 0, y: 0 });
     this.controller = this.world.createCharacterController(0.01);
     this.controller.setSlideEnabled(true);
     this.buildStaticGeometry();
+    this.buildDoors();
     this.world.step();
   }
 
@@ -32,9 +37,22 @@ export class CollisionWorld {
     this.addStaticBox(0,            -(hz + t * 0.5), hx + t, t * 0.5);
     this.addStaticBox( hx + t * 0.5, 0,              t * 0.5, hz);
     this.addStaticBox(-(hx + t * 0.5), 0,             t * 0.5, hz);
-    for (const c of STATIC_COVER) {
+    for (const c of this.map.cover) {
       this.addStaticBox(c.x, c.z, c.halfW, c.halfD);
     }
+  }
+
+  private buildDoors(): void {
+    for (const d of this.map.doors) {
+      const body = this.world.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation(d.x, d.z));
+      const col = this.world.createCollider(RAPIER.ColliderDesc.cuboid(d.halfW, d.halfD), body);
+      this.doorColliders.push(col);
+    }
+  }
+
+  setDoorOpen(index: number, open: boolean): void {
+    const col = this.doorColliders[index];
+    if (col) col.setEnabled(!open);
   }
 
   private addStaticBox(cx: number, cz: number, hw: number, hd: number): void {
@@ -100,6 +118,20 @@ export class CollisionWorld {
     if (!hit) return null;
     const hitNetId = this.colliderHandleToNetId.get(hit.collider.handle) ?? null;
     return { hitNetId, distance: hit.toi };
+  }
+
+  raycastDistance(
+    ox: number,
+    oz: number,
+    dirX: number,
+    dirZ: number,
+    maxDistance: number,
+    excludeNetId?: number,
+  ): number {
+    const exCol = excludeNetId !== undefined ? this.colliders.get(excludeNetId) : undefined;
+    const ray = new RAPIER.Ray({ x: ox, y: oz }, { x: dirX, y: dirZ });
+    const hit = this.world.castRay(ray, maxDistance, true, undefined, undefined, exCol);
+    return hit ? hit.toi : maxDistance;
   }
 
   step(): void {

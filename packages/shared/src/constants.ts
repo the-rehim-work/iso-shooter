@@ -5,8 +5,8 @@ export const SNAPSHOT_RATE = 30;
 
 export const MOVE_SPEED = 6;
 
-export const ARENA_HALF_X = 20;
-export const ARENA_HALF_Z = 20;
+export const ARENA_HALF_X = 30;
+export const ARENA_HALF_Z = 30;
 
 export const INTERP_DELAY_MS = 100;
 
@@ -29,7 +29,93 @@ export const WEAPON_RANGE = 60;
 
 export const MAX_VIEWPORT_ASPECT = 16 / 9;
 
-export type GameMode = 'ffa' | 'tdm';
+export type GameMode = 'ffa' | 'tdm' | 'gungame' | 'domination' | 'bomb' | 'survival' | 'practice' | 'firefight' | 'blackout';
+
+export const GAME_MODES: GameMode[] = ['ffa', 'tdm', 'gungame', 'domination', 'bomb', 'survival', 'practice', 'firefight', 'blackout'];
+
+export const MODE_NAMES: Record<GameMode, string> = {
+  ffa: 'Free For All',
+  tdm: 'Team Deathmatch',
+  gungame: 'Gun Game',
+  domination: 'Domination',
+  bomb: 'Bomb Defusal',
+  survival: 'Wave Survival',
+  practice: 'Practice Range',
+  firefight: 'Firefight',
+  blackout: 'Blackout',
+};
+
+export const FOG_MODES: GameMode[] = ['blackout'];
+export const VISION_RADIUS = 18;
+
+export interface MatchConfig {
+  mode: GameMode;
+  winLimit: number;
+  bots: number;
+  difficulty: 'easy' | 'normal' | 'hard';
+  friendlyFire: boolean;
+  respawn: boolean;
+}
+
+export function defaultMatchConfig(mode: GameMode = 'ffa'): MatchConfig {
+  return { mode, winLimit: 0, bots: 4, difficulty: 'normal', friendlyFire: false, respawn: true };
+}
+
+export function defaultWinLimit(mode: GameMode): number {
+  switch (mode) {
+    case 'gungame': return 8;
+    case 'domination': return DOMINATION_SCORE_TARGET;
+    case 'bomb': return BOMB_ROUNDS_TO_WIN;
+    case 'tdm': return 40;
+    case 'survival': return 0;
+    case 'practice': return 0;
+    default: return FFA_SCORE_TARGET;
+  }
+}
+
+export const DOOR_OPEN_RADIUS = 2.8;
+
+export const CRIT_RADIUS = 0.19;
+export const CRIT_MULTIPLIER = 1.9;
+export const GRAZE_RADIUS = 0.34;
+export const GRAZE_MULTIPLIER = 0.82;
+
+export type ThrowType = 0 | 1 | 2 | 3;
+export const THROW_FRAG = 1;
+export const THROW_MOLOTOV = 2;
+export const THROW_SMOKE = 3;
+
+export const THROW_RANGE = 16;
+export const THROW_COOLDOWN_TICKS = 24;
+export const GRENADE_TRAVEL_SPEED = 18;
+
+export const FRAG_FUSE_TICKS = 12;
+export const FRAG_RADIUS = 5.5;
+export const FRAG_MAX_DAMAGE = 130;
+
+export const MOLOTOV_TTL_TICKS = 30 * 6;
+export const MOLOTOV_RADIUS = 4;
+export const MOLOTOV_DPS = 34;
+
+export const SMOKE_TTL_TICKS = 30 * 9;
+export const SMOKE_RADIUS = 5;
+
+export const GRENADE_LOADOUT = { frag: 2, molotov: 1, smoke: 1 };
+
+export const DOMINATION_SCORE_TARGET = 250;
+export const CAPTURE_TICKS = 90;
+
+export const BOMB_PLANT_TICKS = 30;
+export const BOMB_DEFUSE_TICKS = 45;
+export const BOMB_FUSE_TICKS = 30 * 38;
+export const BOMB_ROUND_TICKS = 30 * 110;
+export const BOMB_ROUNDS_TO_WIN = 4;
+export const ROUND_RESET_TICKS = 30 * 5;
+
+export const SURVIVAL_BASE_ENEMIES = 4;
+export const SURVIVAL_WAVE_BREAK_TICKS = 30 * 6;
+
+export const FFA_SCORE_TARGET = 25;
 
 export const SPAWN_POINTS: { x: number; z: number }[] = [
   { x: -14, z: -14 },

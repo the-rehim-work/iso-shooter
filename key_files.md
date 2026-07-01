@@ -11,13 +11,15 @@ metadata:
 
 | File | What it owns |
 |---|---|
-| `constants.ts` | All game constants: MOVE_SPEED, WEAPON_*, PLAYER_*, SPAWN_POINTS, TEAM_SPAWN_POINTS, MAX_VIEWPORT_ASPECT, GameMode type |
-| `ecs/components.ts` | All bitECS components: Transform, Velocity, NetId, Owner, ColliderHandle, Health, WeaponState, Team, Kills, Dead; tags: Player, Bot, LocalPlayer, RemotePlayer |
-| `ecs/queries.ts` | All ECS queries: transformNetQuery, botQuery, deadQuery |
-| `sim/movement.ts` | InputCommand interface, integrate(), integrateWithCollision(), applyInputToEntity(), readTransform/writeTransform |
-| `sim/weapon.ts` | WeaponSimState interface, initialWeaponState(), tickWeapon() — returns { next, didFire } |
-| `sim/collision.ts` | CollisionWorld class — addCharacter/removeCharacter, resolveMovement, castRayForHit, step(); colliderHandleToNetId reverse map for hitscan |
-| `net/protocol.ts` | MSG constants, WelcomeMessage, InputMessage, SnapshotMessage, EntitySnapshot (includes shotFired), KillEvent, encode/decode |
+| `constants.ts` | Game constants + GameMode union (7 modes), MODE_NAMES, GAME_MODES, DOOR_OPEN_RADIUS, mode tuning (DOMINATION_SCORE_TARGET, CAPTURE_TICKS, BOMB_*, SURVIVAL_*, FFA_SCORE_TARGET) |
+| `sim/weapons.ts` | WeaponDef + WEAPONS table (7), ClassDef + CLASSES (assault/scout/heavy), CLASS_IDS, GUNGAME_LADDER, WEAPON_ORDER, classIdToIndex/classFromIndex, weaponIdToIndex/weaponFromIndex |
+| `sim/maps.ts` | DoorDef, ZoneDef, GameMap; COMPOUND_MAP, EMPTY_MAP, DEFAULT_MAP, MAPS registry, getMap(id) |
+| `ecs/components.ts` | Transform, Velocity, NetId, Owner, ColliderHandle, Health, WeaponState (two-slot), Loadout (classId/speed), Team, Kills (count/deaths/score), Dead; tags Player/Bot/LocalPlayer/RemotePlayer |
+| `ecs/queries.ts` | transformNetQuery, botQuery, deadQuery |
+| `sim/movement.ts` | InputCommand (adds switchTo, interact), integrate(state,cmd,moveSpeed?), integrateWithCollision(...,moveSpeed?), applyInputToEntity, readTransform/writeTransform |
+| `sim/weapon.ts` | WeaponSimState (slot0/1, activeSlot, prevFire), WeaponInput, WeaponPair, initialWeaponState(loadout), tickWeapon(s,input,tick,loadout)→{next,didFire,firedWith}, activeDef/activeAmmo/activeReserve, EQUIP_TICKS |
+| `sim/collision.ts` | CollisionWorld(map) — addCharacter/removeCharacter, resolveMovement, castRayForHit, setDoorOpen(i,open), step(); .map getter |
+| `net/protocol.ts` | MSG (+SetClass/SetName), Welcome (classId/mapId), Input, SetClass/SetName, Snapshot (+hits/doors/mode), EntitySnapshot (+name/classId/weaponId/deaths/score/maxHealth), ModeState, KillEvent, HitEvent |
 | `net/interpolation.ts` | InterpolationBuffer — push(timestampMs, state), sample(timeMs) |
 | `net/prediction.ts` | PredictedEntity — predict(cmd), reconcile(state, ackSeq), pendingCount() |
 
@@ -25,19 +27,20 @@ metadata:
 
 | File | What it owns |
 |---|---|
-| `gameLoop.ts` | GameServer class — addClient, addBot, removeClient, enqueueInput, step, snapshotEntities, consumeKills, getTeamScores, ackFor; firedThisTick Set; netIdToEid Map |
-| `bots.ts` | BotController — register(netId), generateInput(netId, tick) → { moveX, moveZ, aimYaw } |
-| `net/wsServer.ts` | WsServer class — WebSocket accept, broadcast snapshots at 30Hz, forward inputs to GameServer |
-| `main.ts` | Entry point; reads GAME_MODE and GAME_BOTS env vars |
-| `headlessProof.ts` | `npm run test:netcode` — three scenarios: lossless, perturbed reconcile, wall collision |
+| `gameLoop.ts` | GameServer — addClient/addBot/removeClient, setClientClass/setClientName, enqueueInput, step, snapshotEntities, consumeKills/consumeHits, getTeamScores/getDoorMask/getModeState, mapId; mode state machines (updateDomination/updateBomb/updateSurvival); enemyTargetFor/posOf/weaponRangeOf/hasLineOfSight for bots; loadoutFor (gungame ladder), per-class speed/health |
+| `bots.ts` | BotController — generateInput(netId, eid, tick, server) → { moveX, moveZ, aimYaw, fire, reload }; combat AI + wander fallback |
+| `net/wsServer.ts` | IsoWsServer — accepts WS, handles Input/SetClass/SetName, broadcasts 30Hz snapshots, EADDRINUSE handler |
+| `main.ts` | Entry; reads GAME_MODE, GAME_BOTS, PORT; survival self-manages waves |
+| `headlessProof.ts` | `npm run test:netcode` — 6 scenarios: lossless, perturbed reconcile, wall collision, combat kill, door proximity, all-7-modes smoke |
 
 ## Client (packages/client/src/)
 
 | File | What it owns |
 |---|---|
-| `main.ts` | Frame loop wiring: prediction, interpolation, input → cmd, effects trigger, HUD update, audio trigger |
-| `input.ts` | InputSampler — WASD axes, mouseX/Y, fire (held), consumeReload() (one-shot) |
-| `render/scene.ts` | createScene() — ground plane, grid, cover boxes, hemisphere + directional lights w/ shadows |
+| `main.ts` | Frame loop: prediction (per-class speed), interpolation, weapon swap, mode/door state, scoreboard, hit sparks, per-weapon audio; class change on C |
+| `input.ts` | InputSampler — WASD, aim, fire, consumeReload, consumeSwitch (1/2/Q/wheel), interact (E), scoreboardHeld (Tab) |
+| `render/scene.ts` | createScene(map) → { scene, doors: DoorView[], pointFills, pointRings }; cover/zones/bomb-site markers/lights; teamColor() |
+| `ui/classSelect.ts` | showClassSelect() class cards → ClassId; getSavedClass(); localStorage iso_player_class |
 | `render/isoCamera.ts` | createIsoCamera, resizeIsoCamera, moveCameraTarget, screenToGround, cameraGroundBasis, applyViewportCap |
 | `render/characterModel.ts` | CharacterModel — multi-part 3D character, walking/shoot/hit/death animations; muzzleWorldPos(x,z,yaw) static method |
 | `render/entityView.ts` | EntityView — wraps CharacterModel, manages hit flash, death animation lifecycle, respawn |

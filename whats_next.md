@@ -7,7 +7,19 @@ metadata:
   originSessionId: c6445066-096b-4e1f-ad74-ec923fa6f1eb
 ---
 
+## Resolved in Combat & Modes Expansion (2026-06-30)
+Player names shared (SetName + names in EntitySnapshot + tags + scoreboard). Victim hit sparks broadcast via `hits[]`. Classes, 7 weapons, two-slot loadouts, weapon switching. Auto-doors (proximity bitmask). Smart combat bots. Modes: ffa/tdm/gungame/domination/bomb/survival/practice. Per-weapon audio. PORT env. Client production-builds.
+
 ## Known gaps in the current implementation
+
+### Bomb mode needs human attackers
+Bots do not plant or defuse (no objective AI), so bot-only bomb rounds always time out to the defenders. Fix: give bots an objective drive — path to the active site, hold `interact` when inside. Same accessor pattern as `enemyTargetFor`.
+
+### No in-client mode selection
+Mode is chosen by the server's `GAME_MODE` env var; the client just joins whatever is running. Fix: room/lobby system — `GameServer` per room code, mode chosen at room creation, entered in the auth/class flow.
+
+### Weapon slot reconciliation is light
+Client overwrites only the active slot's ammo/reserve from the snapshot; the inactive slot trusts local prediction until next equipped. Diverges only under packet loss mid-swap; resyncs on next equip.
 
 ### Lag compensation for hitscan
 Server fires the ray at the CURRENT position of all entities, not their rewound position. In a 150ms RTT game this means the shooter is always aiming at where the target WAS, so hits feel slightly off at high latency. Fix: store a ring buffer of entity positions (one per server tick, last ~10 ticks) in `GameServer`, then in `resolveHitscan` rewind to the tick corresponding to `shooter.sendTime`.

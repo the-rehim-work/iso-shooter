@@ -49,6 +49,14 @@ Full FFA + TDM. Weapon (30-round mag, 4 mags, reload, 600rpm, 60-unit range, 25d
 ### Production Polish ✓
 Procedural 3D character models (head/helmet/visor/torso/vest/arms/gun/legs). Walking, shoot recoil, hit shake, death topple animations. Muzzle flash (PointLight + sprite, 60ms). Bullet tracer (line, 80ms). Hit sparks (7 particles + gravity, 350ms). Web Audio gunshot/hit/reload/death sounds (procedural synthesis, no asset files). Settings panel (⚙ button, slide-in: volume, latency sim, callsign). Auth dialog on load (callsign entry, stored to localStorage, optional). Shadows (PCFSoft, all cover + ground). `shotFired: boolean` in EntitySnapshot so remote shots trigger visual/audio on client.
 
+### Combat & Modes Expansion ✓
+- **Classes**: Assault / Scout / Heavy (`shared/src/sim/weapons.ts`), each a primary + sidearm, distinct maxHealth and per-class move speed (`Loadout.speed`, applied through `integrate*(…, moveSpeed)`). Picked in `ui/classSelect.ts`, switchable in-game with `C` (sends `SetClass`, server respawns).
+- **Weapons**: pistol/SMG/rifle/shotgun/sniper/LMG/marksman. `WeaponDef` drives damage, fire interval, mag, reload, range, pellets, spread, automatic. Two-slot `WeaponState` (slot0/slot1, activeSlot, prevFire for semi-auto). Switch with `1`/`2`/`Q`/wheel. Shotgun fires `pellets` spread rays server-side.
+- **Maps + doors** (`shared/src/sim/maps.ts`): `COMPOUND_MAP` (central building with 4 auto-doors), `EMPTY_MAP` (used by netcode proof). Doors are toggleable Rapier colliders (`CollisionWorld.setDoorOpen`); server opens by player proximity each tick and broadcasts a `doors` bitmask; client mirrors collider state + slides door meshes.
+- **Modes**: `ffa`, `tdm`, `gungame`, `domination`, `bomb`, `survival`, `practice` — all in `GameServer` (objective state machines + `getModeState()` → `ModeState`). Bomb is round-based (plant/defuse via `E` + site proximity); domination captures control points; survival spawns escalating enemy waves; practice has non-shooting target bots.
+- **Smart bots** (`server/src/bots.ts`): target nearest enemy via `enemyTargetFor`, aim with error + smoothing, fire on LOS within range, strafe/advance/retreat. Practice bots only wander.
+- **Names + hit feedback**: `SetName`, names in `EntitySnapshot` + floating tags + scoreboard (`Tab`). `hits[]` in snapshot spawns victim sparks. Per-weapon gunshot audio; door/switch/beep SFX.
+
 ---
 
 ## 4. File map
@@ -100,22 +108,16 @@ Procedural 3D character models (head/helmet/visor/torso/vest/arms/gun/legs). Wal
 ## 5. ECS components
 
 ```ts
-// Transform: position + aim direction
 Transform { x, z, yaw }
-
-// Identity / ownership
 NetId { value }
 Owner { clientId }
-ColliderHandle { rapier }   // Rapier collider handle (ui32)
-
-// Game state
+ColliderHandle { rapier }
 Health { current, max }
-WeaponState { ammo, reserveMags, cooldownTick, reloadEndTick }
-Team { id }                 // 0=FFA, 1=team1, 2=team2
-Kills { count }
-Dead { respawnTick }        // present = dead; value = tick to respawn at
-
-// Tags (no data, presence = true)
+WeaponState { ammo0, reserve0, ammo1, reserve1, activeSlot, cooldownTick, reloadEndTick, prevFire }
+Loadout { classId, speed }          // class index + per-class move speed
+Team { id }                         // 0=FFA, 1=team1, 2=team2
+Kills { count, deaths, score }
+Dead { respawnTick }                // present = dead; value = tick to respawn at (huge in round modes)
 Player, Bot, LocalPlayer, RemotePlayer
 ```
 
@@ -174,15 +176,18 @@ npm run build               # compile shared + server
 npm run typecheck           # strict type check all 3 packages
 npm run test:netcode        # headless netcode proof — must always PASS
 
-# Server
+# Server — GAME_MODE ∈ ffa|tdm|gungame|domination|bomb|survival|practice
 node packages/server/dist/main.js                    # FFA, 3 bots
-$env:GAME_MODE='tdm'; $env:GAME_BOTS='4'; node packages/server/dist/main.js
+$env:GAME_MODE='bomb'; $env:GAME_BOTS='4'; node packages/server/dist/main.js
+$env:PORT='8090'; node packages/server/dist/main.js  # PORT overridable
 
 # Client dev server
-npm run dev -w packages/client                        # http://localhost:5173
+npm run client                                        # http://localhost:5173
 ```
 
-Controls: WASD move, mouse aim, left-click fire, R reload. ⚙ (bottom-right) opens settings.
+Controls: WASD move, mouse aim, LClick fire, R reload, 1/2 or Q/wheel swap weapon, E interact (plant/defuse), C change class, Tab scoreboard. ⚙ opens settings.
+
+Note: bomb mode requires human attackers — bots do not plant/defuse. All other modes are fully playable solo vs bots.
 
 ---
 

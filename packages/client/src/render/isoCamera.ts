@@ -78,10 +78,12 @@ export function screenToGround(
   clientY: number,
   width: number,
   height: number,
+  planeY = 0,
 ): THREE.Vector3 | null {
   _ndc.x = (clientX / width) * 2 - 1;
   _ndc.y = -(clientY / height) * 2 + 1;
   _ray.setFromCamera(_ndc, cam);
+  _plane.constant = -planeY;
   const ok = _ray.ray.intersectPlane(_plane, _hit);
   return ok ? _hit.clone() : null;
 }
