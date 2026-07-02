@@ -35,6 +35,10 @@ export class CharacterModel {
   private dying = false;
   private deathRoll = 1;
 
+  setBodyColor(color: number): void {
+    this.bodyMat.color.setHex(color);
+  }
+
   constructor(bodyColor: number) {
     this.root = new THREE.Group();
 
@@ -173,6 +177,9 @@ export class CharacterModel {
       5: { bodyZ: 1.2, barrelLen: 1.2, barrelZ: 1.1, mag: 1.6, scale: 1.15, color: 0x2a2a2a },
       6: { bodyZ: 1.15, barrelLen: 1.5, barrelZ: 1.25, mag: 0.9, scale: 1.0, color: 0x4a4030 },
       7: { bodyZ: 0.35, barrelLen: 1.4, barrelZ: 0.55, mag: 0.2, scale: 0.45, color: 0xbfc6cf },
+      8: { bodyZ: 0.55, barrelLen: 0.8, barrelZ: 0.9, mag: 0.4, scale: 0.85, color: 0x5a5a60 },
+      9: { bodyZ: 0.95, barrelLen: 0.9, barrelZ: 1.0, mag: 0.9, scale: 0.95, color: 0x3f4a3a },
+      10: { bodyZ: 0.55, barrelLen: 0.45, barrelZ: 0.8, mag: 1.2, scale: 0.75, color: 0x30343c },
     };
     const p = profiles[weaponId] ?? profiles[2]!;
     const isKnife = weaponId === 7;

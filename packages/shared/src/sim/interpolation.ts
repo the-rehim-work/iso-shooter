@@ -41,8 +41,11 @@ export class InterpolationBuffer {
         const f = span > 1e-6 ? (renderTime - a.t) / span : 0;
         return {
           x: lerp(a.state.x, b.state.x, f),
+          y: lerp(a.state.y, b.state.y, f),
           z: lerp(a.state.z, b.state.z, f),
           yaw: lerpAngle(a.state.yaw, b.state.yaw, f),
+          pitch: lerp(a.state.pitch, b.state.pitch, f),
+          vy: lerp(a.state.vy, b.state.vy, f),
         };
       }
     }

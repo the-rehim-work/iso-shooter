@@ -21,6 +21,7 @@ export interface HudUpdateState {
   className: string;
   myKills: number;
   myDeaths: number;
+  myScore: number;
   mode: GameMode;
   modeState: ModeState;
   myTeam: number;
@@ -214,7 +215,7 @@ export class Hud {
     const ms = s.modeState;
     if (s.mode === 'ffa') {
       this.scoreEl.textContent = 'Leader ' + ms.scoreA + ' / ' + ms.targetScore;
-      this.objectiveEl.textContent = 'You: ' + s.myKills + ' kills · ' + s.myDeaths + ' deaths';
+      this.objectiveEl.textContent = 'You: ' + s.myKills + ' K · ' + s.myDeaths + ' D · ' + s.myScore + ' pts';
     } else if (s.mode === 'gungame') {
       this.scoreEl.textContent = 'Your level ' + (s.myKills + 1) + ' / ' + ms.targetScore;
       this.objectiveEl.textContent = 'Get a kill with every weapon';
@@ -228,7 +229,10 @@ export class Hud {
     } else if (s.mode === 'bomb') {
       this.scoreEl.textContent = 'Atk ' + ms.scoreA + ' — Def ' + ms.scoreB + ' (first to ' + ms.targetScore + ')';
       const t = Math.max(0, Math.ceil(ms.timeLeftTicks / 30));
-      this.objectiveEl.textContent = ms.phase === 'planted' ? 'BOMB ARMED · ' + t + 's' : (s.myTeam === 1 ? 'Plant the bomb · ' : 'Defend · ') + t + 's';
+      if (ms.phase === 'warmup') this.objectiveEl.textContent = 'Round starts in ' + t + 's · you are ' + (s.myTeam === 1 ? 'ATTACKING' : 'DEFENDING');
+      else if (ms.phase === 'roundEnd') this.objectiveEl.textContent = 'Next round in ' + t + 's';
+      else if (ms.phase === 'planted') this.objectiveEl.textContent = (s.myTeam === 2 ? 'DEFUSE — hold E at the site · ' : 'Defend the bomb · ') + t + 's';
+      else this.objectiveEl.textContent = (s.myTeam === 1 ? 'Plant the bomb — hold E at a site · ' : 'Defend the sites · ') + t + 's';
     } else if (s.mode === 'survival') {
       if (ms.phase === 'break') {
         this.scoreEl.textContent = 'Wave ' + ms.wave + ' cleared';
@@ -280,12 +284,22 @@ export class Hud {
         + '<span>' + escapeHtml(r.name) + tag + '</span>'
         + '<span>' + r.kills + ' / ' + r.deaths + ' / ' + r.score + '</span></div>';
     }).join('');
-    this.scoreboardEl.innerHTML = head + body;
+    const controls: [string, string][] = [
+      ['WASD', 'Move'], ['Mouse', 'Aim'], ['LMB', 'Fire'], ['R', 'Reload'],
+      ['Space', 'Jump'], ['1/2 · Q', 'Weapons'], ['3/4/5', 'Grenades'],
+      ['E', 'Plant/Defuse'], ['C', 'Class'], ['T', 'Team'],
+    ];
+    const legend = '<div style="border-top:1px solid #333;margin-top:10px;padding-top:8px;display:grid;grid-template-columns:1fr 1fr;gap:2px 18px">'
+      + controls.map(([k, a]) =>
+        '<div style="display:flex;justify-content:space-between;font-size:11px">'
+        + '<span style="color:#e6b800">' + k + '</span><span style="color:#889">' + a + '</span></div>').join('')
+      + '</div>';
+    this.scoreboardEl.innerHTML = head + body + legend;
   }
 
-  pushKill(killerLabel: string, victimLabel: string, headshot = false): void {
+  pushKill(killerLabel: string, victimLabel: string, headshot = false, streak = 0): void {
     this.killFeed.push({
-      text: killerLabel + (headshot ? ' ✸ ' : ' ▸ ') + victimLabel,
+      text: killerLabel + (headshot ? ' ✸ ' : ' ▸ ') + victimLabel + (streak >= 3 ? ' 🔥' + streak : ''),
       expiresMs: performance.now() + 5000,
     });
     if (this.killFeed.length > 12) this.killFeed.shift();

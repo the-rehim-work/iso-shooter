@@ -1,15 +1,25 @@
-import { Transform } from './components.js';
+import { Transform, Velocity } from './components.js';
 import { integrate, type InputCommand, type MoveState } from '../sim/movement.js';
 import type { GameWorld } from './world.js';
 
 export function readTransform(eid: number): MoveState {
-  return { x: Transform.x[eid]!, z: Transform.z[eid]!, yaw: Transform.yaw[eid]! };
+  return {
+    x: Transform.x[eid]!,
+    y: Transform.y[eid]!,
+    z: Transform.z[eid]!,
+    yaw: Transform.yaw[eid]!,
+    pitch: Transform.pitch[eid]!,
+    vy: Velocity.y[eid]!,
+  };
 }
 
 export function writeTransform(eid: number, s: MoveState): void {
   Transform.x[eid] = s.x;
+  Transform.y[eid] = s.y;
   Transform.z[eid] = s.z;
   Transform.yaw[eid] = s.yaw;
+  Transform.pitch[eid] = s.pitch;
+  Velocity.y[eid] = s.vy;
 }
 
 export function applyInputToEntity(_world: GameWorld, eid: number, input: InputCommand): void {

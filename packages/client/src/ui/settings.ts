@@ -1,14 +1,12 @@
-﻿export type DifficultyOpt = 'easy' | 'normal' | 'hard';
-
-export interface SettingsOptions {
+﻿export interface SettingsOptions {
   initialVolume: number;
+  initialMusic: number;
   initialLatency: number;
   initialName: string;
-  initialDifficulty: DifficultyOpt;
   onVolumeChange(v: number): void;
+  onMusicChange(v: number): void;
   onLatencyChange(ms: number): void;
   onNameChange(name: string): void;
-  onDifficultyChange(d: DifficultyOpt): void;
 }
 
 function el(tag: string, css: Partial<CSSStyleDeclaration>, attrs: Record<string, string> = {}): HTMLElement {
@@ -93,21 +91,6 @@ export class SettingsPanel {
     nameInput.addEventListener('input', () => opts.onNameChange(nameInput.value.trim()));
     this.panel.appendChild(nameInput);
 
-    section('BOTS');
-    const diffSelect = document.createElement('select');
-    Object.assign(diffSelect.style, {
-      background: '#1a1c22', border: '1px solid #444', borderRadius: '5px',
-      color: '#eee', padding: '6px 8px', fontSize: '12px', fontFamily: 'monospace', cursor: 'pointer',
-    });
-    for (const d of ['easy', 'normal', 'hard'] as const) {
-      const o = document.createElement('option');
-      o.value = d; o.textContent = d.toUpperCase();
-      if (d === opts.initialDifficulty) o.selected = true;
-      diffSelect.appendChild(o);
-    }
-    diffSelect.addEventListener('change', () => opts.onDifficultyChange(diffSelect.value as DifficultyOpt));
-    this.panel.appendChild(row('Difficulty', diffSelect));
-
     section('AUDIO');
     const volSlider = sliderEl(0, 100, Math.round(opts.initialVolume * 100));
     const volLabel = el('span', { color: '#eee', fontSize: '12px', minWidth: '32px', textAlign: 'right' });
@@ -117,9 +100,21 @@ export class SettingsPanel {
       volLabel.textContent = Math.round(v * 100) + '%';
       opts.onVolumeChange(v);
     });
-    const volRow = row('Volume', volSlider);
+    const volRow = row('SFX', volSlider);
     volRow.appendChild(volLabel);
     this.panel.appendChild(volRow);
+
+    const musSlider = sliderEl(0, 100, Math.round(opts.initialMusic * 100));
+    const musLabel = el('span', { color: '#eee', fontSize: '12px', minWidth: '32px', textAlign: 'right' });
+    musLabel.textContent = Math.round(opts.initialMusic * 100) + '%';
+    musSlider.addEventListener('input', () => {
+      const v = Number(musSlider.value) / 100;
+      musLabel.textContent = Math.round(v * 100) + '%';
+      opts.onMusicChange(v);
+    });
+    const musRow = row('Music', musSlider);
+    musRow.appendChild(musLabel);
+    this.panel.appendChild(musRow);
 
     section('NETWORK');
     const latSlider = sliderEl(0, 300, opts.initialLatency);
@@ -134,21 +129,9 @@ export class SettingsPanel {
     latRow.appendChild(latLabel);
     this.panel.appendChild(latRow);
 
-    section('CONTROLS');
-    const controls: [string, string][] = [
-      ['WASD', 'Move'], ['Mouse', 'Aim'], ['LClick', 'Fire'], ['R', 'Reload'],
-      ['1 / 2', 'Weapon'], ['Q / Wheel', 'Swap'], ['3 / 4 / 5', 'Frag/Molo/Smoke'],
-      ['E', 'Interact'], ['C', 'Class'], ['T', 'Switch team'], ['Tab', 'Scores'],
-    ];
-    for (const [key, action] of controls) {
-      const r2 = el('div', { display: 'flex', justifyContent: 'space-between', marginBottom: '8px' });
-      const k = el('span', { color: '#e6b800', fontSize: '12px', background: 'rgba(230,184,0,0.12)', padding: '2px 8px', borderRadius: '4px', border: '1px solid #554400' });
-      k.textContent = key;
-      const a = el('span', { color: '#aab', fontSize: '12px' });
-      a.textContent = action;
-      r2.appendChild(k); r2.appendChild(a);
-      this.panel.appendChild(r2);
-    }
+    const tip = el('div', { color: '#556', fontSize: '11px', letterSpacing: '1px', marginTop: '24px' });
+    tip.textContent = 'Hold TAB for scores & controls';
+    this.panel.appendChild(tip);
 
     container.appendChild(this.panel);
 

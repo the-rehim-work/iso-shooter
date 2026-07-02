@@ -3,7 +3,11 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "workspaces": ["packages/shared", "packages/server", "packages/client"],
+  "workspaces": [
+    "packages/shared",
+    "packages/server",
+    "packages/client"
+  ],
   "scripts": {
     "build": "tsc -b packages/shared packages/server",
     "watch": "tsc -b -w packages/shared packages/server",
@@ -13,8 +17,8 @@
     "typecheck": "tsc -b packages/shared packages/server packages/client"
   },
   "devDependencies": {
+    "@types/ws": "^8.5.12",
     "typescript": "^5.5.4",
-    "vite": "^5.4.0",
-    "@types/ws": "^8.5.12"
+    "vite": "^5.4.0"
   }
 }

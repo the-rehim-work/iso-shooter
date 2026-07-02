@@ -55,11 +55,20 @@ metadata:
 ## Key constants (packages/shared/src/constants.ts)
 
 ```
-MOVE_SPEED = 6          PLAYER_RADIUS = 0.5      FIXED_DT = 1/30
+MOVE_SPEED = 6          PLAYER_RADIUS = 0.4      FIXED_DT = 1/30
+PLAYER_HEIGHT = 1.8     PLAYER_EYE_HEIGHT = 1.6  AIM_PITCH_LIMIT = 1.2
+GRAVITY = 24            JUMP_SPEED = 8           GROUND_EPSILON = 0.05
+WALL_HEIGHT = 2.4       HEAD_ZONE_FRACTION = 0.82  LEG_ZONE_FRACTION = 0.22
 PLAYER_MAX_HEALTH = 100  PLAYER_RESPAWN_TICKS = 90
-WEAPON_MAG_SIZE = 30    WEAPON_NUM_MAGS = 4      WEAPON_DAMAGE = 25
-WEAPON_RANGE = 60       WEAPON_FIRE_INTERVAL_TICKS = 3 (600rpm)
-WEAPON_RELOAD_TICKS = 45 (1.5s)
 INTERP_DELAY_MS = 100
 MAX_VIEWPORT_ASPECT = 16/9
 ```
+
+## 3D simulation notes (2026-07-02 migration)
+
+- Physics: `@dimforge/rapier3d-compat@0.12` (same API generation as the old 2d 0.12: `hit.toi`, `capsule(halfHeight, radius)`, `computedGrounded()`).
+- `Transform` = {x, y, z, yaw, pitch}; vertical velocity in `Velocity.y`; MoveState = {x, y, z, yaw, pitch, vy} — vy and pitch MUST be reconciled or replay diverges mid-jump.
+- Feet-space convention: Transform.y is feet height (0 on ground); CollisionWorld converts to capsule-center internally (+PLAYER_HEIGHT/2).
+- Grounded check for jump uses `groundHeightAt` (static-geometry-only downward ray) so prediction replay is deterministic regardless of other characters.
+- Lag comp: `GameServer.posHistory` (20-tick ring per netId, recorded after physics.step), `setClientRtt` fed by wsServer Ping/Pong (server timestamps, client echoes; rewind = RTT + INTERP_DELAY ticks), `rayCapsuleDistance` analytic test in gameLoop.ts — hitscan never touches live rapier body positions for characters; walls via `raycastStaticDistance`.
+- Jump apex ≈ 1.33m < crate height 1.6m — crates are not jump-climbable by design (verticality gameplay is the Phase-7 stretch).

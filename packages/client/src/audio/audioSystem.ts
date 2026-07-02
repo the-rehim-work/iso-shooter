@@ -22,13 +22,42 @@ const SHOT_PROFILES: Record<WeaponId, ShotProfile> = {
   lmg: { crackLen: 0.062, crackHpf: 900, crackGain: 1.7, bodyFrom: 82, bodyTo: 18, bodyGain: 1.25, bodyLen: 0.2, tailLen: 0.24, tailLpf: 620, tailGain: 0.62 },
   dmr: { crackLen: 0.055, crackHpf: 1650, crackGain: 1.8, bodyFrom: 122, bodyTo: 30, bodyGain: 1.2, bodyLen: 0.18, tailLen: 0.2, tailLpf: 720, tailGain: 0.5 },
   knife: { crackLen: 0.02, crackHpf: 2500, crackGain: 0.4, bodyFrom: 200, bodyTo: 120, bodyGain: 0.2, bodyLen: 0.05, tailLen: 0.03, tailLpf: 1500, tailGain: 0.1 },
+  revolver: { crackLen: 0.07, crackHpf: 900, crackGain: 2.0, bodyFrom: 95, bodyTo: 22, bodyGain: 1.35, bodyLen: 0.22, tailLen: 0.28, tailLpf: 520, tailGain: 0.7 },
+  carbine: { crackLen: 0.045, crackHpf: 1550, crackGain: 1.35, bodyFrom: 115, bodyTo: 32, bodyGain: 0.9, bodyLen: 0.13, tailLen: 0.12, tailLpf: 900, tailGain: 0.38 },
+  mp: { crackLen: 0.026, crackHpf: 2700, crackGain: 0.85, bodyFrom: 210, bodyTo: 85, bodyGain: 0.42, bodyLen: 0.055, tailLen: 0.05, tailLpf: 1700, tailGain: 0.18 },
 };
+
+function midiHz(m: number): number {
+  return 440 * Math.pow(2, (m - 69) / 12);
+}
+
+// 8-bar dark orchestral loop in D minor, ~72bpm.
+const BAR_SEC = (60 / 72) * 4;
+const OSTINATO: number[][] = [
+  [38, 38, 41, 38, 34, 34, 36, 36],
+  [38, 38, 41, 38, 34, 34, 33, 33],
+  [38, 38, 41, 38, 34, 34, 36, 36],
+  [38, 38, 41, 43, 41, 38, 36, 33],
+];
+const PAD_CHORDS: number[][] = [
+  [50, 53, 57], // Dm
+  [46, 50, 53], // Bb
+  [43, 46, 50], // Gm
+  [45, 49, 52], // A
+];
+const MELODY: (number | 0)[] = [62, 0, 60, 0, 58, 0, 57, 61];
 
 export class AudioSystem {
   private ctx: AudioContext | null = null;
   private masterGain: GainNode | null = null;
   private _volume = 0.8;
   sfxEnabled = true;
+
+  private musicGain: GainNode | null = null;
+  private _musicVolume = 0.5;
+  private musicTimer: number | null = null;
+  private nextBarTime = 0;
+  private barIndex = 0;
 
   private getCtx(): AudioContext | null {
     if (!this.ctx) return null;
@@ -48,6 +77,115 @@ export class AudioSystem {
   setVolume(v: number): void {
     this._volume = Math.max(0, Math.min(1, v));
     if (this.masterGain) this.masterGain.gain.value = this._volume;
+  }
+
+  setMusicVolume(v: number): void {
+    this._musicVolume = Math.max(0, Math.min(1, v));
+    if (this.musicGain) this.musicGain.gain.value = this._musicVolume * 0.5;
+  }
+
+  // ── procedural score: dark orchestral instrumental, composed in-code ──
+
+  startMusic(): void {
+    const ctx = this.getCtx();
+    if (!ctx || this.musicTimer !== null) return;
+    this.musicGain = ctx.createGain();
+    this.musicGain.gain.value = this._musicVolume * 0.5;
+    this.musicGain.connect(ctx.destination);
+    this.nextBarTime = ctx.currentTime + 0.1;
+    this.barIndex = 0;
+    this.musicTimer = window.setInterval(() => this.pumpMusic(), 300);
+    this.pumpMusic();
+  }
+
+  private pumpMusic(): void {
+    const ctx = this.ctx;
+    if (!ctx || !this.musicGain) return;
+    while (this.nextBarTime < ctx.currentTime + 1.0) {
+      this.scheduleBar(this.barIndex % 8, this.nextBarTime);
+      this.barIndex++;
+      this.nextBarTime += BAR_SEC;
+    }
+  }
+
+  private tone(t: number, freq: number, dur: number, type: OscillatorType, gain: number, attack: number, lpfHz: number, detune = 0): void {
+    const ctx = this.ctx!;
+    const o = ctx.createOscillator();
+    o.type = type;
+    o.frequency.value = freq;
+    o.detune.value = detune;
+    const lpf = ctx.createBiquadFilter();
+    lpf.type = 'lowpass';
+    lpf.frequency.value = lpfHz;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(gain, t + attack);
+    g.gain.setValueAtTime(gain, t + Math.max(attack, dur * 0.7));
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(lpf); lpf.connect(g); g.connect(this.musicGain!);
+    o.start(t); o.stop(t + dur + 0.05);
+  }
+
+  private timpani(t: number, freq: number, gain: number): void {
+    const ctx = this.ctx!;
+    const o = ctx.createOscillator();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(freq * 2.1, t);
+    o.frequency.exponentialRampToValueAtTime(freq, t + 0.09);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(gain, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 1.1);
+    o.connect(g); g.connect(this.musicGain!);
+    o.start(t); o.stop(t + 1.2);
+    const rate = ctx.sampleRate;
+    const len = Math.floor(rate * 0.06);
+    const buf = ctx.createBuffer(1, len, rate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2);
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    const lpf = ctx.createBiquadFilter();
+    lpf.type = 'lowpass'; lpf.frequency.value = 380;
+    const ng = ctx.createGain();
+    ng.gain.setValueAtTime(gain * 0.7, t);
+    src.connect(lpf); lpf.connect(ng); ng.connect(this.musicGain!);
+    src.start(t); src.stop(t + 0.08);
+  }
+
+  private scheduleBar(bar: number, t: number): void {
+    const eighth = BAR_SEC / 8;
+
+    // sub drone
+    this.tone(t, midiHz(26), BAR_SEC + 0.1, 'sine', 0.16, 0.4, 200);
+
+    // low-string ostinato (doubled, detuned)
+    const pattern = OSTINATO[bar % 4]!;
+    for (let i = 0; i < 8; i++) {
+      const nt = t + i * eighth;
+      const hz = midiHz(pattern[i]!);
+      this.tone(nt, hz, eighth * 1.1, 'sawtooth', 0.10, 0.02, 520, -6);
+      this.tone(nt, hz, eighth * 1.1, 'sawtooth', 0.10, 0.02, 520, 6);
+    }
+
+    // pad chord, one per two bars
+    if (bar % 2 === 0) {
+      const chord = PAD_CHORDS[(bar / 2) % 4]!;
+      for (const m of chord) {
+        this.tone(t, midiHz(m), BAR_SEC * 2, 'sawtooth', 0.035, 1.4, 760, -5);
+        this.tone(t, midiHz(m), BAR_SEC * 2, 'sawtooth', 0.035, 1.4, 760, 5);
+      }
+    }
+
+    // timpani on downbeats of even bars, double hit closing the loop
+    if (bar % 2 === 0) this.timpani(t, midiHz(26), 0.5);
+    if (bar === 7) {
+      this.timpani(t + 4 * eighth, midiHz(26), 0.42);
+      this.timpani(t + 6 * eighth, midiHz(31), 0.36);
+    }
+
+    // sparse dark melody line
+    const mel = MELODY[bar]!;
+    if (mel !== 0) this.tone(t + eighth, midiHz(mel), BAR_SEC * 1.6, 'triangle', 0.05, 0.9, 1400);
   }
 
   playGunshot(): void {

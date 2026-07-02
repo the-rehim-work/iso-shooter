@@ -6,6 +6,7 @@ export interface BotOutput {
   moveX: number;
   moveZ: number;
   aimYaw: number;
+  aimPitch: number;
   fire: boolean;
   reload: boolean;
 }
@@ -72,7 +73,7 @@ export class BotController {
 
   generateInput(netId: number, eid: number, tick: number, server: GameServer): BotOutput {
     const b = this.bots.get(netId);
-    if (!b) return { moveX: 0, moveZ: 0, aimYaw: 0, fire: false, reload: false };
+    if (!b) return { moveX: 0, moveZ: 0, aimYaw: 0, aimPitch: 0, fire: false, reload: false };
 
     const me = server.posOf(eid);
     const target = server.enemyTargetFor(eid);
@@ -90,6 +91,7 @@ export class BotController {
     const dx = tp.x - me.x;
     const dz = tp.z - me.z;
     const dist = Math.hypot(dx, dz) || 0.0001;
+    const aimPitch = Math.atan2(server.chestYOf(target) - server.muzzleYOf(eid), dist);
     const range = server.weaponRangeOf(eid);
     const los = server.hasLineOfSight(eid, target);
 
@@ -131,7 +133,7 @@ export class BotController {
       moveX = px; moveZ = pz;
     }
 
-    return { moveX, moveZ, aimYaw: b.aimYaw, fire, reload: false };
+    return { moveX, moveZ, aimYaw: b.aimYaw, aimPitch, fire, reload: false };
   }
 
   private unstick(b: BotState, me: { x: number; z: number }, tick: number, out: BotOutput): void {
@@ -163,6 +165,6 @@ export class BotController {
       b.aimYaw = Math.atan2(b.moveX, b.moveZ);
       b.nextChangeTick = tick + 24 + Math.floor(Math.random() * 40);
     }
-    return { moveX: b.moveX, moveZ: b.moveZ, aimYaw: b.aimYaw, fire: false, reload: false };
+    return { moveX: b.moveX, moveZ: b.moveZ, aimYaw: b.aimYaw, aimPitch: 0, fire: false, reload: false };
   }
 }

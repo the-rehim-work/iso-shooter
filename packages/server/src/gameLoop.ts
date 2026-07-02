@@ -14,6 +14,7 @@ import {
   Bot,
   Team,
   Transform,
+  Velocity,
   WeaponState,
   deadQuery,
   transformNetQuery,
@@ -31,6 +32,11 @@ import {
   classIdToIndex,
   weaponIdToIndex,
   weaponFromIndex,
+  rayCapsuleDistance,
+  MUZZLE_HEIGHT,
+  GRENADE_GRAVITY,
+  GRENADE_BOUNCE,
+  GRENADE_RADIUS,
   THROW_FRAG,
   THROW_MOLOTOV,
   THROW_SMOKE,
@@ -47,14 +53,18 @@ import {
   SMOKE_RADIUS,
   MOVE_SPEED,
   FIXED_DT,
+  TICK_RATE,
+  INTERP_DELAY_MS,
   ARENA_HALF_X,
   PLAYER_RADIUS,
+  PLAYER_HEIGHT,
+  PLAYER_EYE_HEIGHT,
   PLAYER_RESPAWN_TICKS,
   DOOR_OPEN_RADIUS,
-  CRIT_RADIUS,
   CRIT_MULTIPLIER,
-  GRAZE_RADIUS,
   GRAZE_MULTIPLIER,
+  HEAD_ZONE_FRACTION,
+  LEG_ZONE_FRACTION,
   DOMINATION_SCORE_TARGET,
   CAPTURE_TICKS,
   BOMB_PLANT_TICKS,
@@ -70,9 +80,21 @@ import {
   VISION_RADIUS,
   defaultMatchConfig,
   defaultWinLimit,
+  MODE_NAMES,
+  getMap,
+  CollisionWorld,
+  SCORE_KILL,
+  SCORE_HEADSHOT_BONUS,
+  SCORE_ASSIST,
+  SCORE_CAPTURE,
+  SCORE_PLANT,
+  SCORE_DEFUSE,
+  SCORE_WAVE_CLEAR,
+  ASSIST_WINDOW_TICKS,
+  STREAK_ANNOUNCEMENTS,
   type ClassId,
   type MatchConfig,
-  type CollisionWorld,
+  type WeaponId,
   type GameMode,
   type GameWorld,
   type InputCommand,
@@ -107,6 +129,7 @@ interface PendingHitscan {
   shooterNetId: number;
   shooterEid: number;
   aimYaw: number;
+  aimPitch: number;
   def: WeaponDef;
   spread: number;
 }
@@ -118,13 +141,10 @@ interface Projectile {
   ownerTeam: number;
   x: number;
   z: number;
-  sx: number;
-  sz: number;
-  tx: number;
-  tz: number;
-  dist: number;
-  traveled: number;
   h: number;
+  vx: number;
+  vz: number;
+  vh: number;
   landed: boolean;
   detonateTick: number;
 }
@@ -141,6 +161,16 @@ interface Zone {
 }
 
 const ENEMY_NAMES = ['Vex', 'Rook', 'Cinder', 'Halo', 'Drift', 'Onyx', 'Sable', 'Quill', 'Pike', 'Ash', 'Wren', 'Nyx'];
+
+const HISTORY_TICKS = 20;
+
+interface HistoryEntry {
+  tick: number;
+  x: number;
+  y: number;
+  z: number;
+}
+
 
 export class GameServer {
   readonly world: GameWorld;
@@ -174,6 +204,13 @@ export class GameServer {
   private capProgress: number[] = [];
   private capOwner: number[] = [];
 
+  private clientRtt = new Map<number, number>();
+  private posHistory = new Map<number, HistoryEntry[]>();
+
+  // victimNetId -> (attackerNetId -> tick of last damage), for assist credit
+  private damageLog = new Map<number, Map<number, number>>();
+  private streaks = new Map<number, number>();
+
   private bombPhase: 'live' | 'planted' | 'roundEnd' | 'warmup' = 'warmup';
   private bombPhaseEndTick = 0;
   private bombSiteIndex = -1;
@@ -187,15 +224,35 @@ export class GameServer {
   private survivalSpawnedThisWave = 0;
 
   private banner = '';
+  private gungameLadder: WeaponId[] = GUNGAME_LADDER.slice();
 
   constructor(mode: GameMode = 'ffa') {
     this.world = createGameWorld();
     this._mode = mode;
     this.config = defaultMatchConfig(mode);
+    this.names.set(0, 'THE BOMB');
+  }
+
+  private shuffleLadder(): void {
+    const guns = GUNGAME_LADDER.filter((w) => w !== 'knife');
+    for (let i = guns.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [guns[i], guns[j]] = [guns[j]!, guns[i]!];
+    }
+    this.gungameLadder = [...guns, 'knife'];
   }
 
   get mode(): GameMode {
     return this._mode;
+  }
+
+  get clientCount(): number {
+    return this.clients.size;
+  }
+
+  dispose(): void {
+    this.physics?.dispose();
+    this.physics = null;
   }
 
   isHost(clientId: number): boolean {
@@ -216,6 +273,20 @@ export class GameServer {
     this._mode = config.mode;
     this.botController.setDifficulty(config.difficulty);
 
+    if (config.map && this.physics && this.physics.map.id !== config.map) {
+      const old = this.physics;
+      this.setPhysics(new CollisionWorld(getMap(config.map)));
+      old.dispose();
+      for (const c of this.clients.values()) {
+        const h = this.physics!.addCharacter(c.netId, Transform.x[c.eid]!, 0, Transform.z[c.eid]!);
+        ColliderHandle.rapier[c.eid] = h;
+      }
+    }
+
+    this.damageLog.clear();
+    this.streaks.clear();
+    this.shuffleLadder();
+
     this.teamScores = [0, 0];
     this.roundsWon = [0, 0];
     this.wave = 0;
@@ -225,7 +296,7 @@ export class GameServer {
     this.despawnQueue = [];
     this.killBuffer.length = 0;
     this.hitBuffer.length = 0;
-    this.banner = '';
+    this.banner = MODE_NAMES[config.mode].toUpperCase() + ' — MATCH START';
     this.winnerName = '';
     this.matchPhase = 'live';
 
@@ -318,8 +389,8 @@ export class GameServer {
 
   private loadoutFor(eid: number): WeaponPair {
     if (this.mode === 'gungame') {
-      const level = Math.min(Kills.count[eid]!, GUNGAME_LADDER.length - 1);
-      return [WEAPONS[GUNGAME_LADDER[level]!]!, WEAPONS.pistol] as const;
+      const level = Math.min(Kills.count[eid]!, this.gungameLadder.length - 1);
+      return [WEAPONS[this.gungameLadder[level]!]!, WEAPONS.pistol] as const;
     }
     return [weaponFromIndex(Loadout.w0[eid]!), weaponFromIndex(Loadout.w1[eid]!)] as const;
   }
@@ -367,6 +438,8 @@ export class GameServer {
   }
 
   private spawnPoints(team: number): { x: number; z: number }[] {
+    const s = this.physics?.map.spawns;
+    if (s) return team === 2 ? s.team2 : team === 1 ? s.team1 : s.any;
     if (team === 2) return [
       { x: 26, z: -24 }, { x: 27, z: -8 }, { x: 27, z: 8 }, { x: 26, z: 24 },
       { x: 18, z: -18 }, { x: 20, z: 14 }, { x: 22, z: 0 }, { x: 14, z: 24 },
@@ -446,6 +519,7 @@ export class GameServer {
     const spawn = spawnOverride ?? this.pickSpawn(team);
 
     addComponent(this.world, Transform, eid);
+    addComponent(this.world, Velocity, eid);
     addComponent(this.world, NetId, eid);
     addComponent(this.world, Player, eid);
     addComponent(this.world, ColliderHandle, eid);
@@ -457,8 +531,11 @@ export class GameServer {
     if (isBot) addComponent(this.world, Bot, eid);
 
     Transform.x[eid] = spawn.x;
+    Transform.y[eid] = 0;
     Transform.z[eid] = spawn.z;
     Transform.yaw[eid] = 0;
+    Transform.pitch[eid] = 0;
+    Velocity.y[eid] = 0;
     NetId.value[eid] = netId;
     Team.id[eid] = team;
     Kills.count[eid] = 0;
@@ -467,7 +544,7 @@ export class GameServer {
     this.applyClass(eid, classId);
 
     if (this.physics) {
-      const handle = this.physics.addCharacter(netId, spawn.x, spawn.z);
+      const handle = this.physics.addCharacter(netId, spawn.x, 0, spawn.z);
       ColliderHandle.rapier[eid] = handle;
     }
 
@@ -537,6 +614,8 @@ export class GameServer {
     this.physics?.removeCharacter(c.netId);
     this.netIdToEid.delete(c.netId);
     this.names.delete(c.netId);
+    this.posHistory.delete(c.netId);
+    this.clientRtt.delete(clientId);
     removeEntity(this.world, c.eid);
     this.clients.delete(clientId);
     if (this.hostClientId === clientId) {
@@ -551,10 +630,47 @@ export class GameServer {
     this.physics?.removeCharacter(netId);
     this.netIdToEid.delete(netId);
     this.names.delete(netId);
+    this.posHistory.delete(netId);
     this.botEntities.delete(netId);
     this.botClass.delete(netId);
     this.botController.unregister(netId);
     removeEntity(this.world, eid);
+  }
+
+  setClientRtt(clientId: number, rttMs: number): void {
+    this.clientRtt.set(clientId, Math.max(0, rttMs));
+  }
+
+  private rewindTicksFor(shooterEid: number): number {
+    const c = this.clientByEid(shooterEid);
+    if (!c) return 0;
+    const rtt = this.clientRtt.get(c.clientId) ?? 0;
+    const rewindMs = rtt + INTERP_DELAY_MS;
+    return Math.min(HISTORY_TICKS - 1, Math.round((rewindMs / 1000) * TICK_RATE));
+  }
+
+  private rewoundPosOf(eid: number, rewindTicks: number): { x: number; y: number; z: number } {
+    const current = { x: Transform.x[eid]!, y: Transform.y[eid]!, z: Transform.z[eid]!, tick: this.world.tick };
+    if (rewindTicks <= 0) return current;
+    const hist = this.posHistory.get(NetId.value[eid]!);
+    if (!hist || hist.length === 0) return current;
+    const wantTick = this.world.tick - rewindTicks;
+    let best = hist[0]!;
+    for (const h of hist) {
+      if (Math.abs(h.tick - wantTick) < Math.abs(best.tick - wantTick)) best = h;
+    }
+    return best;
+  }
+
+  private recordHistory(): void {
+    const tick = this.world.tick;
+    for (const eid of transformNetQuery(this.world)) {
+      const netId = NetId.value[eid]!;
+      let hist = this.posHistory.get(netId);
+      if (!hist) { hist = []; this.posHistory.set(netId, hist); }
+      hist.push({ tick, x: Transform.x[eid]!, y: Transform.y[eid]!, z: Transform.z[eid]! });
+      if (hist.length > HISTORY_TICKS) hist.shift();
+    }
   }
 
   enqueueInput(clientId: number, cmd: InputCommand): void {
@@ -587,7 +703,7 @@ export class GameServer {
     this.writeWeapon(eid, next);
     if (didFire && firedWith) {
       const nid = NetId.value[eid]!;
-      this.pendingHitscans.push({ shooterNetId: nid, shooterEid: eid, aimYaw: Transform.yaw[eid]!, def: firedWith, spread });
+      this.pendingHitscans.push({ shooterNetId: nid, shooterEid: eid, aimYaw: Transform.yaw[eid]!, aimPitch: Transform.pitch[eid]!, def: firedWith, spread });
       this.firedThisTick.add(nid);
     }
   }
@@ -601,41 +717,52 @@ export class GameServer {
   private resolveHitscan(h: PendingHitscan): void {
     if (!this.physics) return;
     const ox = Transform.x[h.shooterEid]!;
+    const oy = Transform.y[h.shooterEid]! + MUZZLE_HEIGHT;
     const oz = Transform.z[h.shooterEid]!;
     const shooterTeam = Team.id[h.shooterEid]!;
     const def = h.def;
     const pellets = Math.max(1, def.pellets);
+    const rewindTicks = this.rewindTicksFor(h.shooterEid);
 
     for (let p = 0; p < pellets; p++) {
-      const pelletSpread = pellets > 1 ? def.spread + h.spread : h.spread;
+      const pelletSpread = def.spread + h.spread;
       const ang = h.aimYaw + (Math.random() - 0.5) * pelletSpread * 2;
-      const dirX = Math.sin(ang);
-      const dirZ = Math.cos(ang);
-      const result = this.physics.castRayForHit(h.shooterNetId, ox, oz, dirX, dirZ, def.range);
-      if (!result || result.hitNetId === null) continue;
+      const pitchAng = h.aimPitch + (Math.random() - 0.5) * pelletSpread * 1.2;
+      const cosPitch = Math.cos(pitchAng);
+      const dirY = Math.sin(pitchAng);
+      const dirX = Math.sin(ang) * cosPitch;
+      const dirZ = Math.cos(ang) * cosPitch;
+      const wallDist = this.physics.raycastStaticDistance(ox, oy, oz, dirX, dirY, dirZ, def.range);
 
-      const targetEid = this.netIdToEid.get(result.hitNetId);
-      if (targetEid === undefined || this.isDead(targetEid)) continue;
-      if (this.blocks(shooterTeam, Team.id[targetEid]!)) continue;
+      let bestEid = -1;
+      let bestDist = Infinity;
+      let bestFeetY = 0;
+      for (const eid of transformNetQuery(this.world)) {
+        if (eid === h.shooterEid || this.isDead(eid)) continue;
+        // friendly-fire-off shots pass through teammates instead of dying on them
+        if (this.blocks(shooterTeam, Team.id[eid]!)) continue;
+        const pos = this.rewoundPosOf(eid, rewindTicks);
+        const t = rayCapsuleDistance(ox, oy, oz, dirX, dirY, dirZ, pos.x, pos.y, pos.z);
+        if (t === null || t > wallDist || t > def.range) continue;
+        if (t < bestDist) { bestDist = t; bestEid = eid; bestFeetY = pos.y; }
+      }
+      if (bestEid < 0) continue;
 
-      const tx = Transform.x[targetEid]!;
-      const tz = Transform.z[targetEid]!;
-      const rx = tx - ox, rz = tz - oz;
-      const proj = rx * dirX + rz * dirZ;
-      const perp = Math.hypot(rx - proj * dirX, rz - proj * dirZ);
-      const crit = perp < CRIT_RADIUS;
-      const mult = crit ? CRIT_MULTIPLIER : perp > GRAZE_RADIUS ? GRAZE_MULTIPLIER : 1;
+      const hitY = oy + dirY * bestDist;
+      const zone = (hitY - bestFeetY) / PLAYER_HEIGHT;
+      const crit = zone >= HEAD_ZONE_FRACTION;
+      const mult = crit ? CRIT_MULTIPLIER : zone <= LEG_ZONE_FRACTION ? GRAZE_MULTIPLIER : 1;
 
-      const hx = ox + dirX * result.distance;
-      const hz = oz + dirZ * result.distance;
+      const hx = ox + dirX * bestDist;
+      const hz = oz + dirZ * bestDist;
       const fullTo = def.range * 0.4;
       let fo = 1;
-      if (result.distance > fullTo && def.range > fullTo) {
-        const t = Math.min(1, (result.distance - fullTo) / (def.range - fullTo));
+      if (bestDist > fullTo && def.range > fullTo) {
+        const t = Math.min(1, (bestDist - fullTo) / (def.range - fullTo));
         fo = 1 - t * (1 - def.falloff);
       }
       const dmg = Math.max(1, Math.round(def.damage * mult * fo));
-      const fatal = this.damageEntity(targetEid, dmg, h.shooterNetId, crit);
+      const fatal = this.damageEntity(bestEid, dmg, h.shooterNetId, crit);
       if (this.hitBuffer.length < 40) this.hitBuffer.push({ x: hx, z: hz, fatal, crit, dmg });
     }
   }
@@ -643,30 +770,54 @@ export class GameServer {
   private damageEntity(targetEid: number, dmg: number, shooterNetId: number, crit: boolean): boolean {
     const prev = Health.current[targetEid]!;
     if (prev <= 0) return false;
+    const targetNetId = NetId.value[targetEid]!;
+    if (shooterNetId !== targetNetId) {
+      let log = this.damageLog.get(targetNetId);
+      if (!log) { log = new Map(); this.damageLog.set(targetNetId, log); }
+      log.set(shooterNetId, this.world.tick);
+    }
     const next = Math.max(0, prev - dmg);
     Health.current[targetEid] = next;
     if (next === 0) {
-      this.killEntity(targetEid, NetId.value[targetEid]!, shooterNetId, crit);
+      this.killEntity(targetEid, targetNetId, shooterNetId, crit);
       return true;
     }
     return false;
+  }
+
+  private awardScore(eid: number, points: number): void {
+    Kills.score[eid] = (Kills.score[eid]! + points);
+  }
+
+  private awardZoneScore(team: number, x: number, z: number, radius: number, points: number): void {
+    for (const eid of transformNetQuery(this.world)) {
+      if (Team.id[eid] !== team || this.isDead(eid)) continue;
+      const dx = Transform.x[eid]! - x, dz = Transform.z[eid]! - z;
+      if (dx * dx + dz * dz <= radius * radius) this.awardScore(eid, points);
+    }
   }
 
   private killEntity(eid: number, netId: number, killerNetId: number, headshot = false): void {
     Kills.deaths[eid] = (Kills.deaths[eid]! + 1);
     addComponent(this.world, Dead, eid);
     Dead.respawnTick[eid] = this.world.tick + this.respawnTicksFor(eid);
+    this.streaks.set(netId, 0);
 
     const isEnemyWave = this.mode === 'survival' && Team.id[eid] === 2 && hasComponent(this.world, Bot, eid);
     if (isEnemyWave) {
       this.despawnQueue.push({ eid, atTick: this.world.tick + 12 });
     }
 
+    let streak = 0;
     if (killerNetId !== netId) {
       const killerEid = this.netIdToEid.get(killerNetId);
       if (killerEid !== undefined) {
         Kills.count[killerEid] = (Kills.count[killerEid]! + 1);
-        Kills.score[killerEid] = (Kills.score[killerEid]! + 1);
+        this.awardScore(killerEid, SCORE_KILL + (headshot ? SCORE_HEADSHOT_BONUS : 0));
+        streak = (this.streaks.get(killerNetId) ?? 0) + 1;
+        this.streaks.set(killerNetId, streak);
+        const shout = STREAK_ANNOUNCEMENTS[streak];
+        if (shout) this.banner = this.nameFor(killerNetId).toUpperCase() + ' — ' + shout + '!';
         const kt = Team.id[killerEid]!;
         if (kt === 1) this.teamScores[0]++;
         else if (kt === 2) this.teamScores[1]++;
@@ -674,7 +825,18 @@ export class GameServer {
       }
     }
 
-    this.killBuffer.push({ killer: killerNetId, victim: netId, headshot });
+    const contributors = this.damageLog.get(netId);
+    if (contributors) {
+      for (const [attackerNetId, atTick] of contributors) {
+        if (attackerNetId === killerNetId) continue;
+        if (this.world.tick - atTick > ASSIST_WINDOW_TICKS) continue;
+        const aEid = this.netIdToEid.get(attackerNetId);
+        if (aEid !== undefined) this.awardScore(aEid, SCORE_ASSIST);
+      }
+      this.damageLog.delete(netId);
+    }
+
+    this.killBuffer.push({ killer: killerNetId, victim: netId, headshot, streak });
   }
 
   private respawnTicksFor(eid: number): number {
@@ -697,13 +859,16 @@ export class GameServer {
     if (c) { const g = this.classDefFor(eid).grenades; c.frag = g.frag; c.molotov = g.molotov; c.smoke = g.smoke; }
     if (this.isDead(eid)) removeComponent(this.world, Dead, eid);
     Transform.x[eid] = spawn.x;
+    Transform.y[eid] = 0;
     Transform.z[eid] = spawn.z;
+    Transform.pitch[eid] = 0;
+    Velocity.y[eid] = 0;
     Health.current[eid] = Health.max[eid]!;
     this.resetWeapon(eid);
     if (this.physics) {
       const netId = NetId.value[eid]!;
       this.physics.removeCharacter(netId);
-      const handle = this.physics.addCharacter(netId, spawn.x, spawn.z);
+      const handle = this.physics.addCharacter(netId, spawn.x, 0, spawn.z);
       ColliderHandle.rapier[eid] = handle;
     }
   }
@@ -737,6 +902,8 @@ export class GameServer {
         const dx = Transform.x[eid]! - d.x;
         const dz = Transform.z[eid]! - d.z;
         if (dx * dx + dz * dz < DOOR_OPEN_RADIUS * DOOR_OPEN_RADIUS) { open = true; break; }
+        // never close a door onto a body standing inside its frame
+        if (Math.abs(dx) < d.halfW + PLAYER_RADIUS && Math.abs(dz) < d.halfD + PLAYER_RADIUS) { open = true; break; }
       }
       this.physics.setDoorOpen(i, open);
       if (open) mask |= (1 << i);
@@ -777,8 +944,16 @@ export class GameServer {
       if (net !== 0) {
         prog += net / CAPTURE_TICKS;
         prog = Math.max(-1, Math.min(1, prog));
-        if (prog >= 1 && owner !== 1) this.capOwner[i] = 1;
-        if (prog <= -1 && owner !== 2) this.capOwner[i] = 2;
+        if (prog >= 1 && owner !== 1) {
+          this.capOwner[i] = 1;
+          this.awardZoneScore(1, pt.x, pt.z, pt.radius, SCORE_CAPTURE);
+          this.banner = 'BLUE CAPTURED ' + pt.label;
+        }
+        if (prog <= -1 && owner !== 2) {
+          this.capOwner[i] = 2;
+          this.awardZoneScore(2, pt.x, pt.z, pt.radius, SCORE_CAPTURE);
+          this.banner = 'RED CAPTURED ' + pt.label;
+        }
       }
       this.capProgress[i] = prog;
     }
@@ -821,14 +996,17 @@ export class GameServer {
           this.bombSiteIndex = plantingHere;
           this.bombPhaseEndTick = tick + BOMB_FUSE_TICKS;
           this.bombDefuseProgress = 0;
+          const site = sites[plantingHere]!;
+          this.awardZoneScore(1, site.x, site.z, site.radius, SCORE_PLANT);
+          this.banner = 'BOMB PLANTED AT ' + site.label;
         }
       } else {
         this.bombPlantProgress = Math.max(0, this.bombPlantProgress - 1);
       }
 
-      if (this.alivePlayersOnTeam(1) === 0 && this.aliveAttackerBots() === 0) { this.endBombRound(tick, 2); return; }
-      if (this.alivePlayersOnTeam(2) === 0 && this.aliveDefenderBots() === 0) { this.endBombRound(tick, 1); return; }
-      if (tick >= this.bombPhaseEndTick) this.endBombRound(tick, 2);
+      if (this.alivePlayersOnTeam(1) === 0 && this.aliveAttackerBots() === 0) { this.endBombRound(tick, 2, 'ATTACKERS ELIMINATED'); return; }
+      if (this.alivePlayersOnTeam(2) === 0 && this.aliveDefenderBots() === 0) { this.endBombRound(tick, 1, 'DEFENDERS ELIMINATED'); return; }
+      if (tick >= this.bombPhaseEndTick) this.endBombRound(tick, 2, 'TIME UP');
       return;
     }
 
@@ -842,11 +1020,20 @@ export class GameServer {
       }
       if (defusing) {
         this.bombDefuseProgress += 1;
-        if (this.bombDefuseProgress >= BOMB_DEFUSE_TICKS) { this.endBombRound(tick, 2); return; }
+        if (this.bombDefuseProgress >= BOMB_DEFUSE_TICKS) {
+          this.awardZoneScore(2, s.x, s.z, s.radius, SCORE_DEFUSE);
+          this.endBombRound(tick, 2, 'BOMB DEFUSED');
+          return;
+        }
       } else {
         this.bombDefuseProgress = Math.max(0, this.bombDefuseProgress - 1);
       }
-      if (tick >= this.bombPhaseEndTick) this.endBombRound(tick, 1);
+      if (tick >= this.bombPhaseEndTick) {
+        // detonation: big blast at the site that hurts everyone near it
+        this.blasts.push({ type: THROW_FRAG, x: s.x, z: s.z });
+        this.applyAoe(s.x, s.z, s.radius * 2.6, 160, 0, 0, true, true);
+        this.endBombRound(tick, 1, 'BOMB DETONATED');
+      }
     }
   }
 
@@ -893,11 +1080,12 @@ export class GameServer {
     this.reviveAll();
   }
 
-  private endBombRound(tick: number, winner: number): void {
+  private endBombRound(tick: number, winner: number, reason = ''): void {
     if (winner === 1) this.roundsWon[0]++; else this.roundsWon[1]++;
     this.bombPhase = 'roundEnd';
     this.bombPhaseEndTick = tick + ROUND_RESET_TICKS;
-    this.banner = (winner === 1 ? 'ATTACKERS' : 'DEFENDERS') + ' WIN ROUND';
+    const who = (winner === 1 ? 'ATTACKERS' : 'DEFENDERS') + ' WIN ROUND';
+    this.banner = reason ? reason + ' — ' + who : who;
   }
 
   private updateSurvival(tick: number): void {
@@ -909,6 +1097,9 @@ export class GameServer {
       this.survivalPhase = 'break';
       this.survivalBreakEndTick = tick + SURVIVAL_WAVE_BREAK_TICKS;
       this.banner = 'WAVE ' + this.wave + ' CLEARED';
+      for (const c of this.clients.values()) {
+        if (!this.isDead(c.eid)) this.awardScore(c.eid, SCORE_WAVE_CLEAR * this.wave);
+      }
     }
   }
 
@@ -934,11 +1125,17 @@ export class GameServer {
     const sx = Transform.x[c.eid]!, sz = Transform.z[c.eid]!;
     const dx = tx - sx, dz = tz - sz;
     const d = Math.hypot(dx, dz) || 0.0001;
-    const dist = Math.min(THROW_RANGE, d);
+    const dist = Math.max(1.5, Math.min(THROW_RANGE, d));
     const ux = dx / d, uz = dz / d;
+    const releaseH = 1.0;
+    const flightT = dist / GRENADE_TRAVEL_SPEED;
+    // vh solves h(T)=0 for the ballistic arc starting at releaseH
+    const vh = GRENADE_GRAVITY * flightT * 0.5 - releaseH / flightT;
     this.projectiles.push({
       id: this.nextProjId++, type, ownerNetId: c.netId, ownerTeam: Team.id[c.eid]!,
-      x: sx, z: sz, sx, sz, tx: sx + ux * dist, tz: sz + uz * dist, dist, traveled: 0, h: 0, landed: false, detonateTick: 0,
+      x: sx + ux * 0.5, z: sz + uz * 0.5, h: releaseH,
+      vx: ux * GRENADE_TRAVEL_SPEED, vz: uz * GRENADE_TRAVEL_SPEED, vh,
+      landed: false, detonateTick: 0,
     });
   }
 
@@ -955,6 +1152,13 @@ export class GameServer {
       const ex = Transform.x[eid]!, ez = Transform.z[eid]!;
       const dd = Math.hypot(ex - x, ez - z);
       if (dd > radius) continue;
+      if (this.physics && dd > 0.01) {
+        const ey = Transform.y[eid]! + PLAYER_HEIGHT * 0.5;
+        const dx = ex - x, dy = ey - 0.4, dz2 = ez - z;
+        const len = Math.hypot(dx, dy, dz2);
+        const clear = this.physics.raycastStaticDistance(x, 0.4, z, dx / len, dy / len, dz2 / len, len);
+        if (clear < len - 0.05) continue;
+      }
       const dmg = falloff ? Math.round(maxDmg * (1 - dd / radius)) : maxDmg;
       if (dmg <= 0) continue;
       const fatal = this.damageEntity(eid, dmg, ownerNetId, false);
@@ -962,16 +1166,47 @@ export class GameServer {
     }
   }
 
+  private stepProjectile(p: Projectile): void {
+    const stepX = p.vx * FIXED_DT;
+    const stepZ = p.vz * FIXED_DT;
+    const stepLen = Math.hypot(stepX, stepZ);
+    if (stepLen > 1e-6 && this.physics) {
+      // Grenades collide with whatever blocks players: static geometry and
+      // closed doors (open door colliders are disabled, so throws pass through).
+      const castH = Math.max(GRENADE_RADIUS, p.h);
+      const hit = this.physics.raycastStaticNormal(p.x, castH, p.z, stepX / stepLen, 0, stepZ / stepLen, stepLen + GRENADE_RADIUS);
+      if (hit) {
+        const travel = Math.max(0, hit.distance - GRENADE_RADIUS);
+        p.x += (stepX / stepLen) * travel;
+        p.z += (stepZ / stepLen) * travel;
+        const nl = Math.hypot(hit.nx, hit.nz);
+        if (nl > 0.01) {
+          const nx = hit.nx / nl, nz = hit.nz / nl;
+          const ndot = p.vx * nx + p.vz * nz;
+          p.vx = (p.vx - 2 * ndot * nx) * GRENADE_BOUNCE;
+          p.vz = (p.vz - 2 * ndot * nz) * GRENADE_BOUNCE;
+        } else {
+          p.vx = 0;
+          p.vz = 0;
+        }
+      } else {
+        p.x += stepX;
+        p.z += stepZ;
+      }
+    } else {
+      p.x += stepX;
+      p.z += stepZ;
+    }
+    p.vh -= GRENADE_GRAVITY * FIXED_DT;
+    p.h += p.vh * FIXED_DT;
+  }
+
   private updateThrowables(tick: number): void {
     const kept: Projectile[] = [];
     for (const p of this.projectiles) {
       if (!p.landed) {
-        p.traveled += GRENADE_TRAVEL_SPEED * FIXED_DT;
-        const prog = Math.min(1, p.traveled / p.dist);
-        p.x = p.sx + (p.tx - p.sx) * prog;
-        p.z = p.sz + (p.tz - p.sz) * prog;
-        p.h = Math.sin(prog * Math.PI) * Math.min(4, p.dist * 0.18);
-        if (prog >= 1) {
+        this.stepProjectile(p);
+        if (p.h <= 0) {
           p.landed = true; p.h = 0;
           if (p.type === THROW_FRAG) { p.detonateTick = tick + FRAG_FUSE_TICKS; kept.push(p); }
           else if (p.type === THROW_MOLOTOV) { this.spawnZone(THROW_MOLOTOV, p.x, p.z, MOLOTOV_RADIUS, p.ownerNetId, p.ownerTeam, tick + MOLOTOV_TTL_TICKS); }
@@ -1043,6 +1278,7 @@ export class GameServer {
       if (this.isDead(eid)) continue;
       const bi = this.botController.generateInput(netId, eid, tick, this);
       let mx = bi.moveX, mz = bi.moveZ, yaw = bi.aimYaw, interact = false;
+      const botPitch = bi.aimPitch;
 
       if (this.mode === 'bomb' && this.matchPhase === 'live') {
         const obj = this.bombObjectiveFor(eid);
@@ -1060,7 +1296,7 @@ export class GameServer {
       }
 
       const cmd: InputCommand = {
-        seq: 0, moveX: mx, moveZ: mz, aimYaw: yaw, dt: FIXED_DT,
+        seq: 0, moveX: mx, moveZ: mz, aimYaw: yaw, aimPitch: botPitch, dt: FIXED_DT, jump: false,
         fire: bi.fire, reload: bi.reload, switchTo: -1, interact, throwType: 0, throwX: 0, throwZ: 0,
       };
       this.applyMovement(eid, netId, cmd);
@@ -1070,6 +1306,8 @@ export class GameServer {
     }
 
     this.physics?.step();
+
+    this.recordHistory();
 
     for (const h of this.pendingHitscans) this.resolveHitscan(h);
     this.pendingHitscans.length = 0;
@@ -1121,7 +1359,7 @@ export class GameServer {
         const k = Kills.count[eid]!;
         if (k > best) { best = k; bestEid = eid; }
       }
-      const need = this.mode === 'gungame' ? GUNGAME_LADDER.length : limit;
+      const need = this.mode === 'gungame' ? this.gungameLadder.length : limit;
       if (bestEid >= 0 && best >= need) winner = this.nameFor(NetId.value[bestEid]!);
     } else if (this.mode === 'tdm' || this.mode === 'domination') {
       if (this.teamScores[0] >= limit) winner = 'BLUE TEAM';
@@ -1164,6 +1402,18 @@ export class GameServer {
     return { x: Transform.x[eid]!, z: Transform.z[eid]! };
   }
 
+  eyeYOf(eid: number): number {
+    return Transform.y[eid]! + PLAYER_EYE_HEIGHT;
+  }
+
+  muzzleYOf(eid: number): number {
+    return Transform.y[eid]! + MUZZLE_HEIGHT;
+  }
+
+  chestYOf(eid: number): number {
+    return Transform.y[eid]! + PLAYER_HEIGHT * 0.5;
+  }
+
   weaponRangeOf(eid: number): number {
     return activeDef(this.readWeapon(eid), this.loadoutFor(eid)).range;
   }
@@ -1171,12 +1421,14 @@ export class GameServer {
   hasLineOfSight(fromEid: number, toEid: number): boolean {
     if (!this.physics) return true;
     const ox = Transform.x[fromEid]!, oz = Transform.z[fromEid]!;
+    const oy = Transform.y[fromEid]! + PLAYER_HEIGHT * 0.5;
     const tx = Transform.x[toEid]!, tz = Transform.z[toEid]!;
-    const dx = tx - ox, dz = tz - oz;
-    const dist = Math.hypot(dx, dz);
+    const ty = Transform.y[toEid]! + PLAYER_HEIGHT * 0.5;
+    const dx = tx - ox, dy = ty - oy, dz = tz - oz;
+    const dist = Math.hypot(dx, dy, dz);
     if (dist < 0.001) return true;
     if (this.smokeBlocks(ox, oz, tx, tz)) return false;
-    const r = this.physics.castRayForHit(NetId.value[fromEid]!, ox, oz, dx / dist, dz / dist, dist + 0.5);
+    const r = this.physics.castRayForHit(NetId.value[fromEid]!, ox, oy, oz, dx / dist, dy / dist, dz / dist, dist + 0.5);
     if (!r) return true;
     return r.hitNetId === NetId.value[toEid]!;
   }
@@ -1226,17 +1478,18 @@ export class GameServer {
 
   getModeState(): ModeState {
     const base: ModeState = {
-      gameMode: this._mode, matchPhase: this.matchPhase, winner: this.winnerName,
+      gameMode: this._mode, mapId: this.mapId, matchPhase: this.matchPhase, winner: this.winnerName,
       phase: 'live', banner: this.banner, timeLeftTicks: -1,
       scoreA: this.teamScores[0], scoreB: this.teamScores[1],
       pointOwners: this.capOwner.slice(), pointProgress: this.capProgress.slice(),
       bombSite: -1, bombProgress: 0, wave: this.wave, enemiesLeft: 0, targetScore: 0,
+      ladder: this._mode === 'gungame' ? this.gungameLadder.map(weaponIdToIndex) : [],
     };
 
     if (this.isFfaLike()) {
       let topKills = 0;
       for (const eid of transformNetQuery(this.world)) topKills = Math.max(topKills, Kills.count[eid]!);
-      base.targetScore = this.mode === 'gungame' ? GUNGAME_LADDER.length : FFA_SCORE_TARGET;
+      base.targetScore = this.mode === 'gungame' ? this.gungameLadder.length : (this.config.winLimit > 0 ? this.config.winLimit : FFA_SCORE_TARGET);
       base.scoreA = topKills;
     } else if (this.mode === 'domination') {
       base.targetScore = DOMINATION_SCORE_TARGET;
@@ -1270,8 +1523,11 @@ export class GameServer {
       out.push({
         netId,
         x: Transform.x[eid]!,
+        y: Transform.y[eid]!,
         z: Transform.z[eid]!,
         yaw: Transform.yaw[eid]!,
+        pitch: Transform.pitch[eid]!,
+        vy: Velocity.y[eid]!,
         health: Health.current[eid] ?? 0,
         maxHealth: Health.max[eid] ?? 100,
         ammo: activeAmmo(ws),
@@ -1286,6 +1542,9 @@ export class GameServer {
         isBot: hasComponent(this.world, Bot, eid),
         shotFired: this.firedThisTick.has(netId),
         reloading: ws.reloadEndTick !== 0,
+        reloadLeft: ws.reloadEndTick !== 0 ? Math.max(0, ws.reloadEndTick - this.world.tick) : 0,
+        ammoB: ws.activeSlot === 0 ? ws.ammo1 : ws.ammo0,
+        reserveB: ws.activeSlot === 0 ? ws.reserve1 : ws.reserve0,
         name: this.nameFor(netId),
       });
     }

@@ -60,7 +60,11 @@ export class InputSampler {
   }
 
   get interact(): boolean {
-    return this.keys.has('e') || this.keys.has(' ');
+    return this.keys.has('e');
+  }
+
+  get jump(): boolean {
+    return this.keys.has(' ');
   }
 
   consumeReload(): boolean {

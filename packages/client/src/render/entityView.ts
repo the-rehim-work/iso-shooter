@@ -1,19 +1,28 @@
 import * as THREE from 'three';
 import { CharacterModel } from './characterModel.js';
+import { SoldierModel, soldierReady } from './gltfCharacter.js';
 
 export class EntityView {
   readonly mesh: THREE.Group;
-  private character: CharacterModel;
+  private character: CharacterModel | SoldierModel;
   private hitFlashUntilMs = 0;
   private wasDead = false;
   private nameTag: THREE.Sprite | null = null;
   private nameText = '';
   private nameColor = '#ffffff';
+  private bodyColor: number;
 
   constructor(scene: THREE.Scene, color: number) {
-    this.character = new CharacterModel(color);
+    this.character = soldierReady() ? new SoldierModel(color) : new CharacterModel(color);
+    this.bodyColor = color;
     this.mesh = this.character.root;
     scene.add(this.mesh);
+  }
+
+  setColor(color: number): void {
+    if (color === this.bodyColor) return;
+    this.bodyColor = color;
+    this.character.setBodyColor(color);
   }
 
   setWeapon(weaponId: number): void {
@@ -49,8 +58,8 @@ export class EntityView {
     this.nameTag = sprite;
   }
 
-  setState(x: number, z: number, yaw: number): void {
-    this.mesh.position.set(x, 0, z);
+  setState(x: number, y: number, z: number, yaw: number): void {
+    this.mesh.position.set(x, y, z);
     this.mesh.rotation.y = yaw;
   }
 

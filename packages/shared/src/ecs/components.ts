@@ -1,7 +1,7 @@
 import { defineComponent, Types } from 'bitecs';
 
-export const Transform = defineComponent({ x: Types.f32, z: Types.f32, yaw: Types.f32 });
-export const Velocity = defineComponent({ x: Types.f32, z: Types.f32 });
+export const Transform = defineComponent({ x: Types.f32, y: Types.f32, z: Types.f32, yaw: Types.f32, pitch: Types.f32 });
+export const Velocity = defineComponent({ x: Types.f32, y: Types.f32, z: Types.f32 });
 export const NetId = defineComponent({ value: Types.ui32 });
 export const Owner = defineComponent({ clientId: Types.ui32 });
 export const ColliderHandle = defineComponent({ rapier: Types.ui32 });

@@ -1,4 +1,4 @@
-import { GAME_MODES, MODE_NAMES, defaultWinLimit, type GameMode, type MatchConfig } from '@iso/shared';
+import { GAME_MODES, MODE_NAMES, MAPS, defaultWinLimit, type GameMode, type MatchConfig } from '@iso/shared';
 
 function field(label: string, control: HTMLElement): HTMLElement {
   const r = document.createElement('div');
@@ -73,6 +73,9 @@ export function showRoomSetup(current: MatchConfig, title = 'CREATE ROOM'): Prom
     const modeSel = select(GAME_MODES.map((m) => [m, MODE_NAMES[m]] as [string, string]), cfg.mode);
     box.appendChild(field('Game mode', modeSel));
 
+    const mapSel = select(Object.values(MAPS).map((m) => [m.id, m.name] as [string, string]), cfg.map || 'compound');
+    box.appendChild(field('Map', mapSel));
+
     const note = document.createElement('div');
     Object.assign(note.style, { color: '#778', fontSize: '11px', lineHeight: '1.5', marginBottom: '14px', minHeight: '16px' });
     box.appendChild(note);
@@ -115,6 +118,7 @@ export function showRoomSetup(current: MatchConfig, title = 'CREATE ROOM'): Prom
     Object.assign(start.style, { width: '100%', padding: '12px', borderRadius: '6px', cursor: 'pointer', marginTop: '10px', fontSize: '14px', fontFamily: 'monospace', letterSpacing: '2px', fontWeight: 'bold', background: '#e6b800', color: '#111', border: 'none' });
     start.addEventListener('click', () => {
       cfg.mode = modeSel.value as GameMode;
+      cfg.map = mapSel.value;
       cfg.winLimit = winInput ? Math.max(0, parseInt(winInput.value || '0', 10)) : 0;
       cfg.bots = Math.max(0, Math.min(24, parseInt(botInput.value || '0', 10)));
       cfg.difficulty = diffSel.value as 'easy' | 'normal' | 'hard';

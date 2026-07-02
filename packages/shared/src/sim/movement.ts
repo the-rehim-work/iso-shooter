@@ -1,10 +1,13 @@
-import { ARENA_HALF_X, ARENA_HALF_Z, MOVE_SPEED } from '../constants.js';
+import { AIM_PITCH_LIMIT, ARENA_HALF_X, ARENA_HALF_Z, GRAVITY, GROUND_EPSILON, JUMP_SPEED, MOVE_SPEED } from '../constants.js';
 import type { CollisionWorld } from './collision.js';
 
 export interface MoveState {
   x: number;
+  y: number;
   z: number;
   yaw: number;
+  pitch: number;
+  vy: number;
 }
 
 export interface InputCommand {
@@ -12,7 +15,9 @@ export interface InputCommand {
   moveX: number;
   moveZ: number;
   aimYaw: number;
+  aimPitch: number;
   dt: number;
+  jump: boolean;
   fire: boolean;
   reload: boolean;
   switchTo: number;
@@ -32,11 +37,27 @@ function normalizedDir(mx: number, mz: number): { dx: number; dz: number } {
   return { dx: 0, dz: 0 };
 }
 
+export function clampPitch(pitch: number): number {
+  return clamp(pitch, -AIM_PITCH_LIMIT, AIM_PITCH_LIMIT);
+}
+
+function verticalStep(y: number, vy: number, jump: boolean, dt: number): { vy: number } {
+  let nvy = jump && y <= GROUND_EPSILON && vy <= 0 ? JUMP_SPEED : vy;
+  nvy -= GRAVITY * dt;
+  return { vy: nvy };
+}
+
 export function integrate(state: MoveState, input: InputCommand, moveSpeed = MOVE_SPEED): MoveState {
   const { dx, dz } = normalizedDir(input.moveX, input.moveZ);
   const nx = clamp(state.x + dx * moveSpeed * input.dt, -ARENA_HALF_X, ARENA_HALF_X);
   const nz = clamp(state.z + dz * moveSpeed * input.dt, -ARENA_HALF_Z, ARENA_HALF_Z);
-  return { x: nx, z: nz, yaw: input.aimYaw };
+  let { vy } = verticalStep(state.y, state.vy, input.jump, input.dt);
+  let ny = state.y + vy * input.dt;
+  if (ny <= 0) {
+    ny = 0;
+    if (vy < 0) vy = 0;
+  }
+  return { x: nx, y: ny, z: nz, yaw: input.aimYaw, pitch: clampPitch(input.aimPitch), vy };
 }
 
 export function integrateWithCollision(
@@ -49,6 +70,17 @@ export function integrateWithCollision(
   const { dx, dz } = normalizedDir(input.moveX, input.moveZ);
   const wantDx = dx * moveSpeed * input.dt;
   const wantDz = dz * moveSpeed * input.dt;
-  const resolved = cw.resolveMovement(netId, state.x, state.z, wantDx, wantDz);
-  return { x: state.x + resolved.dx, z: state.z + resolved.dz, yaw: input.aimYaw };
+  const groundY = cw.groundHeightAt(netId, state.x, state.y, state.z);
+  const onGround = state.y - groundY <= GROUND_EPSILON;
+  let vy = input.jump && onGround && state.vy <= 0 ? JUMP_SPEED : state.vy;
+  vy -= GRAVITY * input.dt;
+  const wantDy = vy * input.dt;
+  const resolved = cw.resolveMovement(netId, state.x, state.y, state.z, wantDx, wantDy, wantDz);
+  let ny = state.y + resolved.dy;
+  if (resolved.grounded && vy < 0) vy = 0;
+  if (ny <= 0) {
+    ny = 0;
+    if (vy < 0) vy = 0;
+  }
+  return { x: state.x + resolved.dx, y: ny, z: state.z + resolved.dz, yaw: input.aimYaw, pitch: clampPitch(input.aimPitch), vy };
 }

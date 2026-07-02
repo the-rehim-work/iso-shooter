@@ -2,6 +2,7 @@ export * from './constants.js';
 export * from './sim/collision.js';
 export * from './sim/movement.js';
 export * from './sim/prediction.js';
+export * from './sim/ray.js';
 export * from './sim/interpolation.js';
 export * from './sim/weapon.js';
 export * from './sim/weapons.js';

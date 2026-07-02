@@ -31,10 +31,10 @@ export function createIsoCamera(viewSize: number, aspect: number): THREE.Orthogr
 
 const _offset = new THREE.Vector3();
 
-export function moveCameraTarget(cam: THREE.OrthographicCamera, tx: number, tz: number): void {
+export function moveCameraTarget(cam: THREE.OrthographicCamera, tx: number, ty: number, tz: number): void {
   _offset.copy(isoCameraPosition());
-  cam.position.set(tx + _offset.x, _offset.y, tz + _offset.z);
-  cam.lookAt(tx, 0, tz);
+  cam.position.set(tx + _offset.x, ty + _offset.y, tz + _offset.z);
+  cam.lookAt(tx, ty, tz);
   cam.updateMatrixWorld(true);
 }
 
@@ -86,6 +86,19 @@ export function screenToGround(
   _plane.constant = -planeY;
   const ok = _ray.ray.intersectPlane(_plane, _hit);
   return ok ? _hit.clone() : null;
+}
+
+export function screenToWorldRay(
+  cam: THREE.OrthographicCamera,
+  clientX: number,
+  clientY: number,
+  width: number,
+  height: number,
+): { origin: THREE.Vector3; dir: THREE.Vector3 } {
+  _ndc.x = (clientX / width) * 2 - 1;
+  _ndc.y = -(clientY / height) * 2 + 1;
+  _ray.setFromCamera(_ndc, cam);
+  return { origin: _ray.ray.origin.clone(), dir: _ray.ray.direction.clone() };
 }
 
 const _fwd = new THREE.Vector3();

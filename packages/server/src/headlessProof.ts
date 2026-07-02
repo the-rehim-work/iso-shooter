@@ -2,12 +2,15 @@ import {
   FIXED_DT,
   ARENA_HALF_X,
   PLAYER_RADIUS,
+  JUMP_SPEED,
+  INTERP_DELAY_MS,
   initRapier,
   CollisionWorld,
   EMPTY_MAP,
   DEFAULT_MAP,
   GAME_MODES,
   PredictedEntity,
+  InterpolationBuffer,
   integrate,
   integrateWithCollision,
   type InputCommand,
@@ -15,8 +18,12 @@ import {
 } from '@iso/shared';
 import { GameServer } from './gameLoop.js';
 
-function cmd(seq: number, moveX: number, moveZ: number, aimYaw: number, fire: boolean): InputCommand {
-  return { seq, moveX, moveZ, aimYaw, dt: FIXED_DT, fire, reload: false, switchTo: -1, interact: false, throwType: 0, throwX: 0, throwZ: 0 };
+function cmd(seq: number, moveX: number, moveZ: number, aimYaw: number, fire: boolean, jump = false, aimPitch = 0): InputCommand {
+  return { seq, moveX, moveZ, aimYaw, aimPitch, dt: FIXED_DT, jump, fire, reload: false, switchTo: -1, interact: false, throwType: 0, throwX: 0, throwZ: 0 };
+}
+
+function at(x: number, z: number, y = 0, yaw = 0, vy = 0): MoveState {
+  return { x, y, z, yaw, pitch: 0, vy };
 }
 
 function runCombat(): { victimDied: boolean; killLogged: boolean } {
@@ -117,7 +124,7 @@ function scriptedDir(timeMs: number): { mx: number; mz: number } {
 }
 
 function dist(a: MoveState, b: MoveState): number {
-  return Math.hypot(a.x - b.x, a.z - b.z);
+  return Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
 }
 
 function run(perturbStart: boolean): {
@@ -129,9 +136,7 @@ function run(perturbStart: boolean): {
   const clientId = 1;
   server.addClient(clientId, { x: 0, z: 0 });
 
-  const start: MoveState = perturbStart
-    ? { x: 5, z: -3, yaw: 0 }
-    : { x: 0, z: 0, yaw: 0 };
+  const start: MoveState = perturbStart ? at(5, -3) : at(0, 0);
   const predicted = new PredictedEntity(start);
 
   const toServer: Delayed<{ clientId: number; cmd: InputCommand }>[] = [];
@@ -147,23 +152,11 @@ function run(perturbStart: boolean): {
   for (let now = 0; now <= DURATION_MS; now += 1) {
     if (now >= nextClientFrame && now < DURATION_MS - 1500) {
       const dir = scriptedDir(now);
-      const cmd: InputCommand = {
-        seq: ++seq,
-        moveX: dir.mx,
-        moveZ: dir.mz,
-        aimYaw: 0,
-        dt: FIXED_DT,
-        fire: false,
-        reload: false,
-        switchTo: -1,
-        interact: false,
-        throwType: 0,
-        throwX: 0,
-        throwZ: 0,
-      };
-      predicted.predict(cmd);
-      allInputs.push(cmd);
-      toServer.push({ deliverAt: now + HALF, payload: { clientId, cmd } });
+      const jumpNow = Math.floor(now / 1400) % 2 === 1 && now % 1400 < 40;
+      const c = cmd(++seq, dir.mx, dir.mz, 0, false, jumpNow);
+      predicted.predict(c);
+      allInputs.push(c);
+      toServer.push({ deliverAt: now + HALF, payload: { clientId, cmd: c } });
       nextClientFrame += CLIENT_FRAME_MS;
     }
 
@@ -179,7 +172,7 @@ function run(perturbStart: boolean): {
         deliverAt: now + HALF,
         payload: {
           ack: server.ackFor(clientId),
-          selfState: { x: snap.x, z: snap.z, yaw: snap.yaw },
+          selfState: { x: snap.x, y: snap.y, z: snap.z, yaw: snap.yaw, pitch: snap.pitch, vy: snap.vy },
         },
       });
       nextServerStep += SERVER_STEP_MS;
@@ -194,16 +187,19 @@ function run(perturbStart: boolean): {
     }
   }
 
-  let pure: MoveState = { x: 0, z: 0, yaw: 0 };
-  for (const cmd of allInputs) pure = integrate(pure, cmd);
+  let pure: MoveState = at(0, 0);
+  for (const c of allInputs) pure = integrate(pure, c);
   const serverFinal = server.snapshotEntities()[0]!;
   const serverMatchesPureSim =
-    dist(pure, { x: serverFinal.x, z: serverFinal.z, yaw: 0 }) < EPSILON;
+    dist(pure, { x: serverFinal.x, y: serverFinal.y, z: serverFinal.z, yaw: 0, pitch: 0, vy: serverFinal.vy }) < EPSILON;
 
   const finalGap = dist(predicted.state, {
     x: serverFinal.x,
+    y: serverFinal.y,
     z: serverFinal.z,
     yaw: 0,
+    pitch: 0,
+    vy: serverFinal.vy,
   });
 
   return { maxCorrection, finalGap, serverMatchesPureSim };
@@ -218,11 +214,11 @@ function runWallCollision(): { stuckAtWall: boolean; finalGap: number; maxCorrec
 
   const clientId = 1;
   const { netId } = server.addClient(clientId, { x: 0, z: 0 });
-  clientPhysics.addCharacter(netId, 0, 0);
+  clientPhysics.addCharacter(netId, 0, 0, 0);
 
   const stepFn = (state: MoveState, cmd: InputCommand): MoveState =>
     integrateWithCollision(state, cmd, netId, clientPhysics);
-  const predicted = new PredictedEntity({ x: 0, z: 0, yaw: 0 }, stepFn);
+  const predicted = new PredictedEntity(at(0, 0), stepFn);
 
   const toServer: Delayed<{ clientId: number; cmd: InputCommand }>[] = [];
   const toClient: Delayed<{ ack: number; selfState: MoveState }>[] = [];
@@ -236,9 +232,9 @@ function runWallCollision(): { stuckAtWall: boolean; finalGap: number; maxCorrec
 
   for (let now = 0; now <= WALL_DURATION_MS; now += 1) {
     if (now >= nextClientFrame) {
-      const cmd: InputCommand = { seq: ++seq, moveX: 1, moveZ: 0, aimYaw: 0, dt: FIXED_DT, fire: false, reload: false, switchTo: -1, interact: false, throwType: 0, throwX: 0, throwZ: 0 };
-      predicted.predict(cmd);
-      toServer.push({ deliverAt: now + HALF, payload: { clientId, cmd } });
+      const c = cmd(++seq, 1, 0, 0, false);
+      predicted.predict(c);
+      toServer.push({ deliverAt: now + HALF, payload: { clientId, cmd: c } });
       nextClientFrame += CLIENT_FRAME_MS;
     }
 
@@ -254,7 +250,7 @@ function runWallCollision(): { stuckAtWall: boolean; finalGap: number; maxCorrec
         deliverAt: now + HALF,
         payload: {
           ack: server.ackFor(clientId),
-          selfState: { x: snap.x, z: snap.z, yaw: snap.yaw },
+          selfState: { x: snap.x, y: snap.y, z: snap.z, yaw: snap.yaw, pitch: snap.pitch, vy: snap.vy },
         },
       });
       nextServerStep += SERVER_STEP_MS;
@@ -275,6 +271,144 @@ function runWallCollision(): { stuckAtWall: boolean; finalGap: number; maxCorrec
   const finalGap = Math.abs(predicted.state.x - serverFinal.x);
 
   return { stuckAtWall, finalGap, maxCorrection };
+}
+
+function runJump(): { leftGround: boolean; landed: boolean; finalGap: number; maxCorrection: number } {
+  const serverPhysics = new CollisionWorld(EMPTY_MAP);
+  const clientPhysics = new CollisionWorld(EMPTY_MAP);
+
+  const server = new GameServer();
+  server.setPhysics(serverPhysics);
+
+  const clientId = 1;
+  const { netId } = server.addClient(clientId, { x: 0, z: 0 });
+  clientPhysics.addCharacter(netId, 0, 0, 0);
+
+  const stepFn = (state: MoveState, c: InputCommand): MoveState =>
+    integrateWithCollision(state, c, netId, clientPhysics);
+  const predicted = new PredictedEntity(at(0, 0), stepFn);
+
+  const toServer: Delayed<{ clientId: number; cmd: InputCommand }>[] = [];
+  const toClient: Delayed<{ ack: number; selfState: MoveState }>[] = [];
+
+  let seq = 0;
+  let nextServerStep = SERVER_STEP_MS;
+  let nextClientFrame = CLIENT_FRAME_MS;
+  let maxCorrection = 0;
+  let maxPredictedY = 0;
+  let maxServerY = 0;
+
+  const JUMP_DURATION_MS = 4000;
+
+  for (let now = 0; now <= JUMP_DURATION_MS; now += 1) {
+    if (now >= nextClientFrame) {
+      const jumpNow = now < JUMP_DURATION_MS - 1500 && now % 1200 < 30;
+      const c = cmd(++seq, 0.4, 0, 0, false, jumpNow);
+      predicted.predict(c);
+      if (predicted.state.y > maxPredictedY) maxPredictedY = predicted.state.y;
+      toServer.push({ deliverAt: now + HALF, payload: { clientId, cmd: c } });
+      nextClientFrame += CLIENT_FRAME_MS;
+    }
+
+    while (toServer.length && toServer[0]!.deliverAt <= now) {
+      const m = toServer.shift()!;
+      server.enqueueInput(m.payload.clientId, m.payload.cmd);
+    }
+
+    if (now >= nextServerStep) {
+      server.step();
+      const snap = server.snapshotEntities()[0]!;
+      if (snap.y > maxServerY) maxServerY = snap.y;
+      toClient.push({
+        deliverAt: now + HALF,
+        payload: {
+          ack: server.ackFor(clientId),
+          selfState: { x: snap.x, y: snap.y, z: snap.z, yaw: snap.yaw, pitch: snap.pitch, vy: snap.vy },
+        },
+      });
+      nextServerStep += SERVER_STEP_MS;
+    }
+
+    while (toClient.length && toClient[0]!.deliverAt <= now) {
+      const m = toClient.shift()!;
+      const before: MoveState = { ...predicted.state };
+      predicted.reconcile(m.payload.selfState, m.payload.ack);
+      const correction = dist(before, predicted.state);
+      if (correction > maxCorrection) maxCorrection = correction;
+    }
+  }
+
+  const serverFinal = server.snapshotEntities()[0]!;
+  const leftGround = maxPredictedY > 0.8 && maxServerY > 0.8;
+  const landed = Math.abs(serverFinal.y) < 0.05 && Math.abs(predicted.state.y) < 0.05;
+  const finalGap = dist(predicted.state, { x: serverFinal.x, y: serverFinal.y, z: serverFinal.z, yaw: 0, pitch: 0, vy: serverFinal.vy });
+
+  return { leftGround, landed, finalGap, maxCorrection };
+}
+
+function runLagComp(reportedRttMs: number): { kills: number; hits: number } {
+  const server = new GameServer('ffa');
+  server.setPhysics(new CollisionWorld(EMPTY_MAP));
+  const shooterId = 1;
+  const targetId = 2;
+  server.addClient(shooterId, { x: 0, z: 0 });
+  server.addClient(targetId, { x: -10, z: 6 });
+  server.setClientRtt(shooterId, reportedRttMs);
+
+  const ACTUAL_RTT_MS = 150;
+  const perceivedDelayTicks = Math.round(((ACTUAL_RTT_MS + INTERP_DELAY_MS) / 1000) * 30);
+  const targetHist: { x: number; z: number }[] = [];
+  let kills = 0;
+  let hits = 0;
+
+  for (let t = 0; t < 110; t++) {
+    const snap = server.snapshotEntities();
+    const tgt = snap.find((e) => e.netId === 2)!;
+    targetHist.push({ x: tgt.x, z: tgt.z });
+    const idx = Math.max(0, targetHist.length - 1 - perceivedDelayTicks);
+    const aimAt = targetHist[idx]!;
+    const distH = Math.hypot(aimAt.x, aimAt.z) || 0.001;
+    const yaw = Math.atan2(aimAt.x, aimAt.z);
+    const pitch = Math.atan2(0.9 - 1.6, distH);
+
+    const viewReady = targetHist.length > perceivedDelayTicks;
+    server.enqueueInput(targetId, cmd(t + 1, 1, 0, 0, false));
+    server.enqueueInput(shooterId, cmd(t + 1, 0, 0, yaw, viewReady, false, pitch));
+    server.step();
+    kills += server.consumeKills().filter((k) => k.victim === 2).length;
+    hits += server.consumeHits().length;
+  }
+  return { kills, hits };
+}
+
+function runInterpolationSmoothness():{ sawJumpArc: boolean; maxFrameDeltaY: number; smooth: boolean } {
+  const buf = new InterpolationBuffer();
+  let state = at(0, 0);
+  let seq = 0;
+  const snapshotMs = 1000 / 30;
+  for (let tick = 0; tick < 90; tick++) {
+    const jumpNow = tick === 20 || tick === 55;
+    state = integrate(state, cmd(++seq, 0.5, 0, 0, false, jumpNow));
+    buf.push(tick * snapshotMs, state);
+  }
+
+  let maxFrameDeltaY = 0;
+  let sawJumpArc = false;
+  let prevY: number | null = null;
+  const frameMs = 1000 / 60;
+  for (let t = INTERP_DELAY_MS; t <= 90 * snapshotMs; t += frameMs) {
+    const s = buf.sample(t - INTERP_DELAY_MS);
+    if (!s) continue;
+    if (s.y > 0.8) sawJumpArc = true;
+    if (prevY !== null) {
+      const dy = Math.abs(s.y - prevY);
+      if (dy > maxFrameDeltaY) maxFrameDeltaY = dy;
+    }
+    prevY = s.y;
+  }
+
+  const maxPhysicalPerFrame = JUMP_SPEED * (frameMs / 1000) * 1.5;
+  return { sawJumpArc, maxFrameDeltaY, smooth: maxFrameDeltaY <= maxPhysicalPerFrame };
 }
 
 await initRapier();
@@ -299,6 +433,19 @@ console.log(`  server player stuck at wall:    ${wall.stuckAtWall} (want true)`)
 console.log(`  max reconcile correction:       ${wall.maxCorrection.toExponential(2)} (want ~0, client+server agree)`);
 console.log(`  final predicted vs server gap:  ${wall.finalGap.toExponential(2)} (want ~0)\n`);
 
+const jump = runJump();
+console.log('[jump — predicted vertical motion under 150ms RTT]');
+console.log(`  left ground on both sides:      ${jump.leftGround} (want true)`);
+console.log(`  landed back at y=0:             ${jump.landed} (want true)`);
+console.log(`  max reconcile correction:       ${jump.maxCorrection.toExponential(2)} (want ~0)`);
+console.log(`  final predicted vs server gap:  ${jump.finalGap.toExponential(2)} (want ~0)\n`);
+
+const smooth = runInterpolationSmoothness();
+console.log('[interpolation — remote jump sampled at 60Hz render, 100ms delay]');
+console.log(`  jump arc visible in samples:    ${smooth.sawJumpArc} (want true)`);
+console.log(`  max per-frame y delta:          ${smooth.maxFrameDeltaY.toFixed(3)} (want <= ${(JUMP_SPEED / 60 * 1.5).toFixed(3)})`);
+console.log(`  no popping:                     ${smooth.smooth} (want true)\n`);
+
 const combat = runCombat();
 console.log('[combat — shooter kills a facing target]');
 console.log(`  victim died:                    ${combat.victimDied} (want true)`);
@@ -313,6 +460,14 @@ console.log('[spawns — clear of cover + not stacked (24 in TDM)]');
 console.log(`  none inside cover:              ${spawns.allClear} (want true)`);
 console.log(`  none overlapping:              ${spawns.noOverlap} (want true)\n`);
 
+const lagComp = runLagComp(150);
+const noComp = runLagComp(0);
+console.log('[lag compensation — shooter aims at 250ms-stale view of strafing target]');
+console.log(`  hits with accurate RTT rewind:  ${lagComp.hits} (want >= 4)`);
+console.log(`  kill with accurate RTT rewind:  ${lagComp.kills >= 1} (want true)`);
+console.log(`  hits with no RTT rewind:        ${noComp.hits} (want ~0, proves rewind is doing the work)`);
+console.log(`  kill with no RTT rewind:        ${noComp.kills >= 1} (want false)\n`);
+
 const modes = runModeSmoke();
 console.log('[all modes — 260-tick smoke with bots]');
 console.log(`  every mode stepped cleanly:     ${modes.ok}${modes.ok ? '' : ' (failed: ' + modes.failedMode + ')'} (want true)\n`);
@@ -326,11 +481,21 @@ const pass =
   wall.stuckAtWall &&
   wall.finalGap < 0.05 &&
   wall.maxCorrection < 0.15 &&
+  jump.leftGround &&
+  jump.landed &&
+  jump.finalGap < 0.05 &&
+  jump.maxCorrection < 0.15 &&
+  smooth.sawJumpArc &&
+  smooth.smooth &&
   combat.victimDied &&
   combat.killLogged &&
   doors.doorOpened &&
   spawns.allClear &&
   spawns.noOverlap &&
+  lagComp.kills >= 1 &&
+  lagComp.hits >= 4 &&
+  noComp.kills === 0 &&
+  noComp.hits <= 1 &&
   modes.ok;
 
 console.log(pass

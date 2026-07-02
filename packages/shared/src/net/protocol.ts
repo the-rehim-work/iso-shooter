@@ -3,15 +3,28 @@ import type { GameMode, MatchConfig } from '../constants.js';
 import type { ClassId } from '../sim/weapons.js';
 
 export const MSG = {
+  Join: 'join',
+  RoomError: 'roomerror',
   Welcome: 'welcome',
   Input: 'input',
   Snapshot: 'snapshot',
   SetClass: 'setclass',
   SetName: 'setname',
-  SetDifficulty: 'setdifficulty',
   ConfigureMatch: 'configure',
   SetTeam: 'setteam',
+  Ping: 'ping',
+  Pong: 'pong',
 } as const;
+
+export interface PingMessage {
+  t: typeof MSG.Ping;
+  ts: number;
+}
+
+export interface PongMessage {
+  t: typeof MSG.Pong;
+  ts: number;
+}
 
 export interface WelcomeMessage {
   t: typeof MSG.Welcome;
@@ -23,6 +36,20 @@ export interface WelcomeMessage {
   mapId: string;
   isHost: boolean;
   config: MatchConfig;
+  roomCode: string;
+}
+
+// room: '' = create a private room, 'LOBBY' = public quick-play room,
+// anything else = join that room code
+export interface JoinMessage {
+  t: typeof MSG.Join;
+  name: string;
+  room: string;
+}
+
+export interface RoomErrorMessage {
+  t: typeof MSG.RoomError;
+  reason: string;
 }
 
 export interface ConfigureMatchMessage {
@@ -50,15 +77,11 @@ export interface SetNameMessage {
   name: string;
 }
 
-export interface SetDifficultyMessage {
-  t: typeof MSG.SetDifficulty;
-  difficulty: 'easy' | 'normal' | 'hard';
-}
-
 export interface KillEvent {
   killer: number;
   victim: number;
   headshot: boolean;
+  streak: number;
 }
 
 export interface HitEvent {
@@ -94,8 +117,11 @@ export interface BlastEvent {
 export interface EntitySnapshot {
   netId: number;
   x: number;
+  y: number;
   z: number;
   yaw: number;
+  pitch: number;
+  vy: number;
   health: number;
   maxHealth: number;
   ammo: number;
@@ -110,11 +136,15 @@ export interface EntitySnapshot {
   isBot: boolean;
   shotFired: boolean;
   reloading: boolean;
+  reloadLeft: number;
+  ammoB: number;
+  reserveB: number;
   name: string;
 }
 
 export interface ModeState {
   gameMode: GameMode;
+  mapId: string;
   matchPhase: string;
   winner: string;
   phase: string;
@@ -129,6 +159,7 @@ export interface ModeState {
   wave: number;
   enemiesLeft: number;
   targetScore: number;
+  ladder: number[];
 }
 
 export interface SnapshotMessage {
@@ -147,8 +178,8 @@ export interface SnapshotMessage {
   grenades: { frag: number; molotov: number; smoke: number };
 }
 
-export type ClientToServer = InputMessage | SetClassMessage | SetNameMessage | SetDifficultyMessage | ConfigureMatchMessage | SetTeamMessage;
-export type ServerToClient = WelcomeMessage | SnapshotMessage;
+export type ClientToServer = JoinMessage | InputMessage | SetClassMessage | SetNameMessage | ConfigureMatchMessage | SetTeamMessage | PongMessage;
+export type ServerToClient = WelcomeMessage | SnapshotMessage | PingMessage | RoomErrorMessage;
 
 export function encode(msg: ClientToServer | ServerToClient): string {
   return JSON.stringify(msg);

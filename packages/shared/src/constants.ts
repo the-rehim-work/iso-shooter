@@ -17,6 +17,16 @@ export const CAMERA_DISTANCE = 80;
 export const RECONCILE_SNAP_EPSILON = 0.0005;
 
 export const PLAYER_RADIUS = 0.4;
+export const PLAYER_HEIGHT = 1.8;
+export const PLAYER_EYE_HEIGHT = 1.6;
+// Hitscan origin/travel height for flat (direction-only) shots: mid-torso, so a
+// level shot registers as a body hit, not a head crit.
+export const MUZZLE_HEIGHT = 1.15;
+export const AIM_PITCH_LIMIT = 1.2;
+export const GRAVITY = 24;
+export const JUMP_SPEED = 8;
+export const GROUND_EPSILON = 0.05;
+export const WALL_HEIGHT = 2.4;
 export const PLAYER_MAX_HEALTH = 100;
 export const PLAYER_RESPAWN_TICKS = 90;
 
@@ -46,10 +56,12 @@ export const MODE_NAMES: Record<GameMode, string> = {
 };
 
 export const FOG_MODES: GameMode[] = ['blackout'];
+export const FFA_LIKE_MODES: GameMode[] = ['ffa', 'gungame', 'firefight', 'blackout'];
 export const VISION_RADIUS = 18;
 
 export interface MatchConfig {
   mode: GameMode;
+  map: string;
   winLimit: number;
   bots: number;
   difficulty: 'easy' | 'normal' | 'hard';
@@ -58,8 +70,24 @@ export interface MatchConfig {
 }
 
 export function defaultMatchConfig(mode: GameMode = 'ffa'): MatchConfig {
-  return { mode, winLimit: 0, bots: 4, difficulty: 'normal', friendlyFire: false, respawn: true };
+  return { mode, map: 'compound', winLimit: 0, bots: 4, difficulty: 'normal', friendlyFire: false, respawn: true };
 }
+
+// Score points (Kills.score). Kills.count still drives FFA/gungame win checks.
+export const SCORE_KILL = 100;
+export const SCORE_HEADSHOT_BONUS = 50;
+export const SCORE_ASSIST = 50;
+export const SCORE_CAPTURE = 150;
+export const SCORE_PLANT = 300;
+export const SCORE_DEFUSE = 300;
+export const SCORE_WAVE_CLEAR = 75;
+export const ASSIST_WINDOW_TICKS = 150;
+export const STREAK_ANNOUNCEMENTS: Record<number, string> = {
+  3: 'KILLING SPREE',
+  5: 'RAMPAGE',
+  8: 'UNSTOPPABLE',
+  12: 'GODLIKE',
+};
 
 export function defaultWinLimit(mode: GameMode): number {
   switch (mode) {
@@ -75,10 +103,10 @@ export function defaultWinLimit(mode: GameMode): number {
 
 export const DOOR_OPEN_RADIUS = 2.8;
 
-export const CRIT_RADIUS = 0.19;
 export const CRIT_MULTIPLIER = 1.9;
-export const GRAZE_RADIUS = 0.34;
 export const GRAZE_MULTIPLIER = 0.82;
+export const HEAD_ZONE_FRACTION = 0.82;
+export const LEG_ZONE_FRACTION = 0.22;
 
 export type ThrowType = 0 | 1 | 2 | 3;
 export const THROW_FRAG = 1;
@@ -88,6 +116,9 @@ export const THROW_SMOKE = 3;
 export const THROW_RANGE = 16;
 export const THROW_COOLDOWN_TICKS = 24;
 export const GRENADE_TRAVEL_SPEED = 18;
+export const GRENADE_GRAVITY = 30;
+export const GRENADE_BOUNCE = 0.45;
+export const GRENADE_RADIUS = 0.15;
 
 export const FRAG_FUSE_TICKS = 12;
 export const FRAG_RADIUS = 5.5;
@@ -138,11 +169,12 @@ export interface CoverBox {
   z: number;
   halfW: number;
   halfD: number;
+  halfH: number;
 }
 
 export const STATIC_COVER: CoverBox[] = [
-  { x:  6, z:  5, halfW: 1.5, halfD: 0.5 },
-  { x: -6, z: -5, halfW: 1.5, halfD: 0.5 },
-  { x:  5, z: -7, halfW: 0.5, halfD: 1.5 },
-  { x: -5, z:  7, halfW: 0.5, halfD: 1.5 },
+  { x:  6, z:  5, halfW: 1.5, halfD: 0.5, halfH: 0.8 },
+  { x: -6, z: -5, halfW: 1.5, halfD: 0.5, halfH: 0.8 },
+  { x:  5, z: -7, halfW: 0.5, halfD: 1.5, halfH: 0.8 },
+  { x: -5, z:  7, halfW: 0.5, halfD: 1.5, halfH: 0.8 },
 ];
