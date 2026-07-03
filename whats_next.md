@@ -64,6 +64,15 @@ Sparks only appear at the shooter's tracer endpoint, not at the victim's body. T
 - **UI**: controls legend lives in the Tab scoreboard only; settings panel slimmed (SFX/Music/latency/name).
 - **Audio**: procedural dark orchestral score (D-minor, 72bpm, 8-bar loop: sub drone, detuned low-string ostinato, pad chords Dm–Bb–Gm–A, timpani, sparse melody) synthesized in Web Audio — no asset files; independent Music volume slider.
 
+## Resolved in Fairness + Bots + CS-bomb pass (2026-07-03)
+- **Bots**: per-bot skill with exactly one "ace" per roster (others 0.35–0.75 band, difficulty scales the band); targets acquired only with LOS inside a 26u sight radius (fog clamps to VISION_RADIUS) with 3s last-seen memory + investigate; target stickiness + weighted pick among two nearest spreads aggro off the leader; aim error grows with distance; two-whisker wall avoidance (`GameServer.wallClearance`); survival waves still omnisciently hunt.
+- **Gungame fairness**: classes are cosmetic-only — base 100hp, base speed, zero grenades (`applyClass`/`grenadeKitFor` gate on mode).
+- **Class-switch abuse**: SetClass only sets `pendingClass`; applied in `respawnEntity`. No mid-fight heal/teleport. Client shows "→ X (next spawn)" and derives speed/loadout from the snapshot's classId.
+- **Bomb, CS-ified**: random attacker carries the bomb (only carrier plants), death/leave drops it (pickup by walk-over, 1.6u), halftime side swap at `limit-1` rounds played (teams + roundsWon flip, HALFTIME banner), plant/defuse progress resets on release (was decay). ModeState carries bombCarrier/bombDropped/bombDropX/Z; HUD shows carrier/escort/recover roles; bomb marker on minimap for attackers only; bots: carrier pushes site, squad escorts, defenders hold sites, post-plant attackers protect.
+- **Minimap honesty**: enemies appear only while spotted (LOS from you or any living ally within 26u, smoke-aware, 6.7Hz recompute) — CS-radar rules.
+- **Jump has a purpose**: JUMP_SPEED 9.2 (apex ~1.78) — crates (1.6) and desks (1.5) are mountable, walls (2.4) are not; verified landing on a crate. Jump poses: procedural model tucks legs, GLTF soldier leans back with anims faded.
+- **Music v2**: 16-bar arrangement with sectional dynamics (sparse → build → climax → recede), generated-IR hall reverb, 3-osc vibrato string ensemble instead of raw saws, formant "ah" choir layer, varied percussion, two alternating melody phrases (octave lift at the climax), 66bpm.
+
 ## Next logical features (in priority order)
 
 1. **Lobby polish** — pre-game waiting room listing connected players before the host starts; today the host's room-setup dialog fills this role.

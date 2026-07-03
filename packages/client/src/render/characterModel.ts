@@ -225,7 +225,7 @@ export class CharacterModel {
     this.rLeg.rotation.x = 0;
   }
 
-  update(dt: number, speed: number): void {
+  update(dt: number, speed: number, airborne = false): void {
     if (this.dying) {
       this.deadProgress = Math.min(1, this.deadProgress + dt * 2.2);
       const p = 1 - (1 - this.deadProgress) * (1 - this.deadProgress);
@@ -244,16 +244,24 @@ export class CharacterModel {
     this.root.rotation.z = 0;
     this.root.position.y = 0;
 
-    const moving = speed > 0.08;
-    if (moving) this.walkPhase += dt * Math.max(speed, 0.8) * 3.0;
+    if (airborne) {
+      // jump pose: legs tucked, off-hand out for balance
+      this.lLeg.rotation.x = -0.7;
+      this.rLeg.rotation.x = 0.45;
+      this.lArm.rotation.x = -0.75;
+      this.torsoGrp.position.y = 1.12;
+    } else {
+      const moving = speed > 0.08;
+      if (moving) this.walkPhase += dt * Math.max(speed, 0.8) * 3.0;
 
-    const sw = Math.sin(this.walkPhase) * (moving ? 0.3 : 0);
-    this.lLeg.rotation.x = sw;
-    this.rLeg.rotation.x = -sw;
-    this.lArm.rotation.x = -0.2 - sw * 0.38;
+      const sw = Math.sin(this.walkPhase) * (moving ? 0.3 : 0);
+      this.lLeg.rotation.x = sw;
+      this.rLeg.rotation.x = -sw;
+      this.lArm.rotation.x = -0.2 - sw * 0.38;
 
-    const bob = moving ? Math.abs(Math.sin(this.walkPhase)) * 0.032 : 0;
-    this.torsoGrp.position.y = 1.12 + bob;
+      const bob = moving ? Math.abs(Math.sin(this.walkPhase)) * 0.032 : 0;
+      this.torsoGrp.position.y = 1.12 + bob;
+    }
 
     this.recoil = Math.max(0, this.recoil - dt * 9);
     this.gunPivot.position.z = 0.16 - this.recoil * 0.1;

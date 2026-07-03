@@ -31,21 +31,26 @@ function midiHz(m: number): number {
   return 440 * Math.pow(2, (m - 69) / 12);
 }
 
-// 8-bar dark orchestral loop in D minor, ~72bpm.
-const BAR_SEC = (60 / 72) * 4;
+// 16-bar dark orchestral piece in D minor, ~66bpm, with sectional dynamics so
+// it breathes instead of droning: sparse open, building middle, full climax,
+// receding close.
+const BAR_SEC = (60 / 66) * 4;
+const MUSIC_BARS = 16;
+const INTENSITY = [0.4, 0.4, 0.5, 0.55, 0.75, 0.8, 0.85, 0.9, 1, 1, 1, 0.95, 0.7, 0.6, 0.5, 0.45];
 const OSTINATO: number[][] = [
   [38, 38, 41, 38, 34, 34, 36, 36],
   [38, 38, 41, 38, 34, 34, 33, 33],
-  [38, 38, 41, 38, 34, 34, 36, 36],
-  [38, 38, 41, 43, 41, 38, 36, 33],
+  [38, 38, 41, 43, 41, 38, 36, 36],
+  [38, 41, 45, 41, 34, 38, 36, 33],
 ];
+// one chord per two bars across 16 bars: Dm Dm Bb Gm | Dm C Bb A
 const PAD_CHORDS: number[][] = [
-  [50, 53, 57], // Dm
-  [46, 50, 53], // Bb
-  [43, 46, 50], // Gm
-  [45, 49, 52], // A
+  [50, 53, 57], [50, 53, 57], [46, 50, 53], [43, 46, 50],
+  [50, 53, 57], [48, 52, 55], [46, 50, 53], [45, 49, 52],
 ];
-const MELODY: (number | 0)[] = [62, 0, 60, 0, 58, 0, 57, 61];
+// two alternating 8-bar phrases (0 = rest)
+const MELODY_A: number[] = [62, 0, 60, 0, 58, 57, 0, 0];
+const MELODY_B: number[] = [65, 0, 62, 0, 61, 0, 57, 0];
 
 export class AudioSystem {
   private ctx: AudioContext | null = null;
@@ -91,7 +96,29 @@ export class AudioSystem {
     if (!ctx || this.musicTimer !== null) return;
     this.musicGain = ctx.createGain();
     this.musicGain.gain.value = this._musicVolume * 0.5;
-    this.musicGain.connect(ctx.destination);
+
+    // hall reverb from a generated impulse response — this is what keeps the
+    // synthesized orchestra from sounding like raw oscillators
+    const irLen = Math.floor(ctx.sampleRate * 2.6);
+    const ir = ctx.createBuffer(2, irLen, ctx.sampleRate);
+    for (let ch = 0; ch < 2; ch++) {
+      const d = ir.getChannelData(ch);
+      for (let i = 0; i < irLen; i++) {
+        d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / irLen, 2.4);
+      }
+    }
+    const convolver = ctx.createConvolver();
+    convolver.buffer = ir;
+    const dry = ctx.createGain();
+    dry.gain.value = 0.55;
+    const wet = ctx.createGain();
+    wet.gain.value = 0.5;
+    this.musicGain.connect(dry);
+    this.musicGain.connect(convolver);
+    convolver.connect(wet);
+    dry.connect(ctx.destination);
+    wet.connect(ctx.destination);
+
     this.nextBarTime = ctx.currentTime + 0.1;
     this.barIndex = 0;
     this.musicTimer = window.setInterval(() => this.pumpMusic(), 300);
@@ -101,28 +128,69 @@ export class AudioSystem {
   private pumpMusic(): void {
     const ctx = this.ctx;
     if (!ctx || !this.musicGain) return;
-    while (this.nextBarTime < ctx.currentTime + 1.0) {
-      this.scheduleBar(this.barIndex % 8, this.nextBarTime);
+    while (this.nextBarTime < ctx.currentTime + 1.2) {
+      this.scheduleBar(this.barIndex % MUSIC_BARS, this.nextBarTime);
       this.barIndex++;
       this.nextBarTime += BAR_SEC;
     }
   }
 
-  private tone(t: number, freq: number, dur: number, type: OscillatorType, gain: number, attack: number, lpfHz: number, detune = 0): void {
+  // ensemble string voice: three detuned oscillators with slow vibrato through
+  // a lowpass — much closer to bowed strings than a bare sawtooth
+  private strings(t: number, freq: number, dur: number, gain: number, attack: number, lpfHz: number): void {
     const ctx = this.ctx!;
-    const o = ctx.createOscillator();
-    o.type = type;
-    o.frequency.value = freq;
-    o.detune.value = detune;
     const lpf = ctx.createBiquadFilter();
     lpf.type = 'lowpass';
-    lpf.frequency.value = lpfHz;
+    lpf.frequency.setValueAtTime(lpfHz * 0.7, t);
+    lpf.frequency.linearRampToValueAtTime(lpfHz, t + attack + 0.2);
     const g = ctx.createGain();
     g.gain.setValueAtTime(0.0001, t);
     g.gain.linearRampToValueAtTime(gain, t + attack);
-    g.gain.setValueAtTime(gain, t + Math.max(attack, dur * 0.7));
+    g.gain.setValueAtTime(gain, t + Math.max(attack, dur * 0.65));
     g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    o.connect(lpf); lpf.connect(g); g.connect(this.musicGain!);
+    lpf.connect(g); g.connect(this.musicGain!);
+
+    const vib = ctx.createOscillator();
+    vib.frequency.value = 4.6 + Math.random() * 0.8;
+    const vibGain = ctx.createGain();
+    vibGain.gain.setValueAtTime(0, t);
+    vibGain.gain.linearRampToValueAtTime(7, t + attack + 0.4);
+    vib.connect(vibGain);
+
+    for (const [type, det, mul] of [['sawtooth', -8, 0.5], ['sawtooth', 7, 0.5], ['triangle', 0, 0.9]] as [OscillatorType, number, number][]) {
+      const o = ctx.createOscillator();
+      o.type = type;
+      o.frequency.value = freq;
+      o.detune.value = det;
+      vibGain.connect(o.detune);
+      const og = ctx.createGain();
+      og.gain.value = mul;
+      o.connect(og); og.connect(lpf);
+      o.start(t); o.stop(t + dur + 0.05);
+    }
+    vib.start(t); vib.stop(t + dur + 0.05);
+  }
+
+  // dark "ah" choir: sawtooth pushed through two vowel formant bands
+  private choir(t: number, freq: number, dur: number, gain: number): void {
+    const ctx = this.ctx!;
+    const o = ctx.createOscillator();
+    o.type = 'sawtooth';
+    o.frequency.value = freq;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(gain, t + dur * 0.35);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    for (const [f, q, m] of [[620, 9, 1.0], [1040, 11, 0.55]]) {
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.value = f!;
+      bp.Q.value = q!;
+      const bg = ctx.createGain();
+      bg.gain.value = m!;
+      o.connect(bp); bp.connect(bg); bg.connect(g);
+    }
+    g.connect(this.musicGain!);
     o.start(t); o.stop(t + dur + 0.05);
   }
 
@@ -154,38 +222,63 @@ export class AudioSystem {
 
   private scheduleBar(bar: number, t: number): void {
     const eighth = BAR_SEC / 8;
+    const heat = INTENSITY[bar]!;
 
-    // sub drone
-    this.tone(t, midiHz(26), BAR_SEC + 0.1, 'sine', 0.16, 0.4, 200);
+    // sub drone, always present, swells with intensity
+    const ctx = this.ctx!;
+    const drone = ctx.createOscillator();
+    drone.type = 'sine';
+    drone.frequency.value = midiHz(26);
+    const dg = ctx.createGain();
+    dg.gain.setValueAtTime(0.10 + heat * 0.07, t);
+    dg.gain.linearRampToValueAtTime(0.0001, t + BAR_SEC + 0.3);
+    drone.connect(dg); dg.connect(this.musicGain!);
+    drone.start(t); drone.stop(t + BAR_SEC + 0.35);
 
-    // low-string ostinato (doubled, detuned)
-    const pattern = OSTINATO[bar % 4]!;
-    for (let i = 0; i < 8; i++) {
-      const nt = t + i * eighth;
-      const hz = midiHz(pattern[i]!);
-      this.tone(nt, hz, eighth * 1.1, 'sawtooth', 0.10, 0.02, 520, -6);
-      this.tone(nt, hz, eighth * 1.1, 'sawtooth', 0.10, 0.02, 520, 6);
-    }
-
-    // pad chord, one per two bars
-    if (bar % 2 === 0) {
-      const chord = PAD_CHORDS[(bar / 2) % 4]!;
-      for (const m of chord) {
-        this.tone(t, midiHz(m), BAR_SEC * 2, 'sawtooth', 0.035, 1.4, 760, -5);
-        this.tone(t, midiHz(m), BAR_SEC * 2, 'sawtooth', 0.035, 1.4, 760, 5);
+    // low-string ostinato: full 8ths at high intensity, halved pulse mid,
+    // silent in the quiet sections — this is what kills the monotony
+    if (heat >= 0.7) {
+      const pattern = OSTINATO[bar % 4]!;
+      for (let i = 0; i < 8; i++) {
+        this.strings(t + i * eighth, midiHz(pattern[i]!), eighth * 1.25, 0.11 * heat, 0.02, 560);
+      }
+    } else if (heat >= 0.5) {
+      const pattern = OSTINATO[0]!;
+      for (let i = 0; i < 8; i += 2) {
+        this.strings(t + i * eighth, midiHz(pattern[i]!), eighth * 2.3, 0.09, 0.05, 480);
       }
     }
 
-    // timpani on downbeats of even bars, double hit closing the loop
-    if (bar % 2 === 0) this.timpani(t, midiHz(26), 0.5);
-    if (bar === 7) {
-      this.timpani(t + 4 * eighth, midiHz(26), 0.42);
-      this.timpani(t + 6 * eighth, midiHz(31), 0.36);
+    // sustained chord, one per two bars
+    if (bar % 2 === 0) {
+      const chord = PAD_CHORDS[(bar / 2) % 8]!;
+      for (const m of chord) {
+        this.strings(t, midiHz(m), BAR_SEC * 2.1, 0.028 + heat * 0.016, 1.6, 800);
+      }
+      // low choir doubles the root in the quiet and climax sections
+      if (heat <= 0.5 || heat >= 1) {
+        this.choir(t, midiHz(chord[0]! - 12), BAR_SEC * 2.1, 0.16);
+      }
     }
 
-    // sparse dark melody line
-    const mel = MELODY[bar]!;
-    if (mel !== 0) this.tone(t + eighth, midiHz(mel), BAR_SEC * 1.6, 'triangle', 0.05, 0.9, 1400);
+    // percussion: sparse when quiet, driving pattern at the climax
+    if (heat >= 1) {
+      this.timpani(t, midiHz(26), 0.5);
+      this.timpani(t + 4 * eighth, midiHz(26), 0.3);
+      if (bar % 2 === 1) this.timpani(t + 6 * eighth, midiHz(31), 0.34);
+    } else if (heat >= 0.7 && bar % 2 === 0) {
+      this.timpani(t, midiHz(26), 0.45);
+    } else if (bar % 4 === 0) {
+      this.timpani(t, midiHz(26), 0.35);
+    }
+
+    // melody: two alternating phrases, an octave up at the climax
+    const phrase = bar < 8 ? MELODY_A : MELODY_B;
+    const mel = phrase[bar % 8]!;
+    if (mel !== 0) {
+      const lift = heat >= 1 ? 12 : 0;
+      this.strings(t + eighth, midiHz(mel + lift), BAR_SEC * 1.7, 0.035 + heat * 0.02, 0.8, 1500);
+    }
   }
 
   playGunshot(): void {

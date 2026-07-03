@@ -24,6 +24,7 @@ import {
   activeAmmo,
   activeReserve,
   CLASSES,
+  CLASS_IDS,
   WEAPONS,
   GUNGAME_LADDER,
   FOG_MODES,
@@ -207,7 +208,7 @@ window.addEventListener('keydown', (e) => {
     void showClassSelect(getSavedClass()).then((cid) => {
       classPickerOpen = false;
       myClassId = cid;
-      currentMoveSpeed = MOVE_SPEED * CLASSES[cid].speedMul;
+      // takes effect on next spawn — the server decides, speed follows the snapshot
       net.send(encode({ t: MSG.SetClass, classId: cid }));
     });
   }
@@ -216,6 +217,7 @@ window.addEventListener('keydown', (e) => {
 let myNetId = -1;
 let myMode: GameMode = 'ffa';
 let myTeam = 0;
+let myEffectiveClass: ClassId = myClassId;
 let currentMoveSpeed = MOVE_SPEED * CLASSES[myClassId].speedMul;
 let predicted: PredictedEntity | null = null;
 let myLoadout: WeaponPair = [WEAPONS[CLASSES[myClassId].primary], WEAPONS[CLASSES[myClassId].secondary]];
@@ -244,6 +246,7 @@ function emptyModeState(): ModeState {
     phase: 'live', banner: '', timeLeftTicks: -1, scoreA: 0, scoreB: 0,
     pointOwners: [], pointProgress: [], bombSite: -1, bombProgress: 0,
     wave: 0, enemiesLeft: 0, targetScore: 0, ladder: [],
+    bombCarrier: -1, bombDropped: false, bombDropX: 0, bombDropZ: 0,
   };
 }
 
@@ -254,7 +257,7 @@ function loadoutForMe(): WeaponPair {
     const level = Math.min(myKills, ladder.length - 1);
     return [WEAPONS[ladder[level]!], WEAPONS.pistol];
   }
-  const cd = CLASSES[myClassId];
+  const cd = CLASSES[myEffectiveClass];
   return [WEAPONS[cd.primary], WEAPONS[cd.secondary]];
 }
 
@@ -441,6 +444,10 @@ net.onMessage((dataStr) => {
         myDeaths = e.deaths;
         myScore = e.score;
         myTeam = e.team;
+        // the server owns my class (pending changes apply on respawn)
+        const eff = CLASS_IDS[e.classId] ?? 'assault';
+        myEffectiveClass = eff;
+        currentMoveSpeed = myMode === 'gungame' ? MOVE_SPEED : MOVE_SPEED * CLASSES[eff].speedMul;
         myLoadout = loadoutForMe();
         const slot = localWeapon.activeSlot;
         if (slot === 0) {
@@ -603,8 +610,12 @@ function interactHint(): string {
   if (!predicted) return '';
   if (myMode === 'bomb') {
     if (myTeam === 1 && modeState.phase === 'live') {
-      for (const s of gameMap.bombSites) {
-        if (nearZone(s.x, s.z, s.radius)) return 'Hold E to PLANT at ' + s.label;
+      if (modeState.bombCarrier === myNetId) {
+        for (const s of gameMap.bombSites) {
+          if (nearZone(s.x, s.z, s.radius)) return 'Hold E to PLANT at ' + s.label;
+        }
+      } else if (modeState.bombDropped && nearZone(modeState.bombDropX, modeState.bombDropZ, 4)) {
+        return 'Walk over the bomb to pick it up';
       }
     }
     if (myTeam === 2 && modeState.phase === 'planted' && modeState.bombSite >= 0) {
@@ -625,6 +636,31 @@ function nearZone(x: number, z: number, radius: number): boolean {
 let last = performance.now();
 let inputAcc = 0;
 let bombBeepAcc = 0;
+let spotTimer = 0;
+const spotted = new Set<number>();
+
+// CS-style radar: an enemy shows on the minimap only while my team has eyes
+// on them (LOS from me or any living ally within spotting range)
+function recomputeSpotted(): void {
+  spotted.clear();
+  const allies: { x: number; z: number }[] = [];
+  for (const [nid, e] of ent) {
+    if (e.isDead || isEnemy(e.team, nid)) continue;
+    allies.push(nid === myNetId && predicted ? { x: predicted.state.x, z: predicted.state.z } : { x: e.x, z: e.z });
+  }
+  for (const [nid, e] of ent) {
+    if (!isEnemy(e.team, nid) || e.isDead) continue;
+    for (const a of allies) {
+      const dx = e.x - a.x, dz = e.z - a.z;
+      const dist = Math.hypot(dx, dz);
+      if (dist > 26) continue;
+      if (smokeBlocksClient(a.x, a.z, e.x, e.z)) continue;
+      if (dist < 0.01) { spotted.add(nid); break; }
+      const clear = clientPhysics.raycastDistance(a.x, PLAYER_HEIGHT * 0.5, a.z, dx / dist, 0, dz / dist, dist, myNetId);
+      if (clear >= dist - 0.6) { spotted.add(nid); break; }
+    }
+  }
+}
 let prevPredX = 0;
 let prevPredZ = 0;
 let recoilKickX = 0;
@@ -831,15 +867,17 @@ function frame(now: number): void {
   const def = activeDef(localWeapon, myLoadout);
   const me = ent.get(myNetId);
   const isReloading = localWeapon.reloadEndTick !== 0 && localTick < localWeapon.reloadEndTick;
+  const pendingSuffix = myClassId !== myEffectiveClass ? ' → ' + CLASSES[myClassId].name + ' (next spawn)' : '';
   hud.update({
-    health: me ? me.health : CLASSES[myClassId].maxHealth,
-    maxHealth: me ? me.maxHealth : CLASSES[myClassId].maxHealth,
+    health: me ? me.health : CLASSES[myEffectiveClass].maxHealth,
+    maxHealth: me ? me.maxHealth : CLASSES[myEffectiveClass].maxHealth,
     ammo: activeAmmo(localWeapon),
     reserveMags: activeReserve(localWeapon),
     isReloading,
     weaponName: def.name,
     melee: def.melee,
-    className: CLASSES[myClassId].name,
+    className: (myMode === 'gungame' ? 'Gun Game' : CLASSES[myEffectiveClass].name) + pendingSuffix,
+    myNetId,
     myKills, myDeaths, myScore,
     mode: myMode,
     modeState,
@@ -849,6 +887,9 @@ function frame(now: number): void {
     grenades,
   }, nowMs);
 
+  spotTimer += dt;
+  if (spotTimer >= 0.15) { spotTimer = 0; recomputeSpotted(); }
+
   const blips: MinimapBlip[] = [];
   for (const [netId, e] of ent) {
     const isMe = netId === myNetId;
@@ -856,10 +897,18 @@ function frame(now: number): void {
     const pos = isMe && predicted ? predicted.state : (views.get(netId)?.mesh.position ?? e);
     blips.push({
       x: pos.x, z: pos.z, isMe, ally: !enemy, dead: e.isDead,
-      visible: isMe || !enemy || !fogMode || (views.get(netId)?.mesh.visible ?? false),
+      visible: isMe || !enemy || spotted.has(netId),
     });
   }
-  minimap.update(gameMap, myMode, modeState, doorMask, blips);
+  let bombMark: { x: number; z: number } | null = null;
+  if (myMode === 'bomb' && myTeam === 1 && modeState.phase === 'live') {
+    if (modeState.bombDropped) bombMark = { x: modeState.bombDropX, z: modeState.bombDropZ };
+    else if (modeState.bombCarrier >= 0) {
+      const ce = ent.get(modeState.bombCarrier);
+      if (ce) bombMark = { x: ce.x, z: ce.z };
+    }
+  }
+  minimap.update(gameMap, myMode, modeState, doorMask, blips, bombMark);
 
   hud.setScoreboard(scoreRows(), input.scoreboardHeld, myMode);
   hud.setDebug(`netId:${myNetId === -1 ? '-' : myNetId} ents:${views.size} pending:${predicted?.pendingCount() ?? 0}`);

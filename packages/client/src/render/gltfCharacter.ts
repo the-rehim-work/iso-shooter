@@ -162,7 +162,7 @@ export class SoldierModel {
     this.run.setEffectiveWeight(0);
   }
 
-  update(dt: number, speed: number): void {
+  update(dt: number, speed: number, airborne = false): void {
     if (this.dying) {
       this.deadProgress = Math.min(1, this.deadProgress + dt * 2.2);
       const p = 1 - (1 - this.deadProgress) * (1 - this.deadProgress);
@@ -171,11 +171,12 @@ export class SoldierModel {
       this.root.position.y = -Math.sin(p * Math.PI * 0.5) * 0.45;
       return;
     }
-    this.root.rotation.x = 0;
+    // slight backward lean mid-air reads as a jump (the rig has no jump clip)
+    this.root.rotation.x = airborne ? -0.14 : 0;
     this.root.rotation.z = 0;
     this.root.position.y = 0;
 
-    const moveW = Math.min(1, Math.max(0, speed / 1.6));
+    const moveW = airborne ? 0 : Math.min(1, Math.max(0, speed / 1.6));
     const runW = Math.min(1, Math.max(0, (speed - 3.2) / 2.6));
     const targets: [THREE.AnimationAction, number][] = [
       [this.idle, 1 - moveW],

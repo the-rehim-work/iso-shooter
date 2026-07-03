@@ -60,6 +60,7 @@ import {
   PLAYER_HEIGHT,
   PLAYER_EYE_HEIGHT,
   PLAYER_RESPAWN_TICKS,
+  PLAYER_MAX_HEALTH,
   DOOR_OPEN_RADIUS,
   CRIT_MULTIPLIER,
   GRAZE_MULTIPLIER,
@@ -117,6 +118,7 @@ interface ClientState {
   netId: number;
   name: string;
   classId: ClassId;
+  pendingClass: ClassId | null;
   inputQueue: InputCommand[];
   lastProcessedSeq: number;
   frag: number;
@@ -217,6 +219,9 @@ export class GameServer {
   private bombPlantProgress = 0;
   private bombDefuseProgress = 0;
   private roundsWon: [number, number] = [0, 0];
+  private bombCarrier = -1;
+  private bombDrop: { x: number; z: number } | null = null;
+  private sidesSwapped = false;
 
   private wave = 0;
   private survivalPhase: 'break' | 'fighting' = 'break';
@@ -309,6 +314,9 @@ export class GameServer {
     this.bombSiteIndex = -1;
     this.bombPlantProgress = 0;
     this.bombDefuseProgress = 0;
+    this.bombCarrier = -1;
+    this.bombDrop = null;
+    this.sidesSwapped = false;
     this.survivalPhase = 'break';
     this.survivalBreakEndTick = this.world.tick + 30 * 3;
     this.survivalSpawnedThisWave = 0;
@@ -429,12 +437,24 @@ export class GameServer {
   private applyClass(eid: number, classId: ClassId): void {
     Loadout.classId[eid] = classIdToIndex(classId);
     const cd = CLASSES[classId];
-    Loadout.speed[eid] = MOVE_SPEED * cd.speedMul;
+    if (this.mode === 'gungame') {
+      // gungame is a level playing field: no class perks, ladder weapons only
+      Loadout.speed[eid] = MOVE_SPEED;
+      Health.max[eid] = PLAYER_MAX_HEALTH;
+      Health.current[eid] = PLAYER_MAX_HEALTH;
+    } else {
+      Loadout.speed[eid] = MOVE_SPEED * cd.speedMul;
+      Health.max[eid] = cd.maxHealth;
+      Health.current[eid] = cd.maxHealth;
+    }
     Loadout.w0[eid] = weaponIdToIndex(cd.primary);
     Loadout.w1[eid] = weaponIdToIndex(cd.secondary);
-    Health.max[eid] = cd.maxHealth;
-    Health.current[eid] = cd.maxHealth;
     this.resetWeapon(eid);
+  }
+
+  private grenadeKitFor(eid: number): { frag: number; molotov: number; smoke: number } {
+    if (this.mode === 'gungame') return { frag: 0, molotov: 0, smoke: 0 };
+    return this.classDefFor(eid).grenades;
   }
 
   private spawnPoints(team: number): { x: number; z: number }[] {
@@ -559,9 +579,9 @@ export class GameServer {
     Owner.clientId[eid] = clientId;
     const name = 'Player ' + netId;
     this.names.set(netId, name);
-    const g = CLASSES[classId].grenades;
+    const g = this.grenadeKitFor(eid);
     this.clients.set(clientId, {
-      clientId, eid, netId, name, classId, inputQueue: [], lastProcessedSeq: 0,
+      clientId, eid, netId, name, classId, pendingClass: null, inputQueue: [], lastProcessedSeq: 0,
       frag: g.frag, molotov: g.molotov, smoke: g.smoke, lastThrowTick: -999,
     });
     if (this.hostClientId === null) this.hostClientId = clientId;
@@ -572,10 +592,9 @@ export class GameServer {
     const c = this.clients.get(clientId);
     if (!c) return;
     if (!CLASS_IDS.includes(classId)) return;
-    c.classId = classId;
-    if (this.mode === 'gungame') return;
-    this.applyClass(c.eid, classId);
-    if (!this.isDead(c.eid)) this.respawnEntity(c.eid);
+    // class changes take effect on the next spawn — no mid-fight escape respawn
+    if (classId === c.classId) { c.pendingClass = null; return; }
+    c.pendingClass = classId;
   }
 
   isTeamMode(): boolean {
@@ -608,9 +627,17 @@ export class GameServer {
     this.botController.register(netId);
   }
 
+  private dropBombIfCarrier(netId: number, eid: number): void {
+    if (this.mode === 'bomb' && this.bombPhase === 'live' && netId === this.bombCarrier) {
+      this.bombDrop = { x: Transform.x[eid]!, z: Transform.z[eid]! };
+      this.bombCarrier = -1;
+    }
+  }
+
   removeClient(clientId: number): void {
     const c = this.clients.get(clientId);
     if (!c) return;
+    this.dropBombIfCarrier(c.netId, c.eid);
     this.physics?.removeCharacter(c.netId);
     this.netIdToEid.delete(c.netId);
     this.names.delete(c.netId);
@@ -627,6 +654,7 @@ export class GameServer {
   private despawnBot(netId: number): void {
     const eid = this.botEntities.get(netId);
     if (eid === undefined) return;
+    this.dropBombIfCarrier(netId, eid);
     this.physics?.removeCharacter(netId);
     this.netIdToEid.delete(netId);
     this.names.delete(netId);
@@ -803,6 +831,12 @@ export class GameServer {
     Dead.respawnTick[eid] = this.world.tick + this.respawnTicksFor(eid);
     this.streaks.set(netId, 0);
 
+    if (this.mode === 'bomb' && this.bombPhase === 'live' && netId === this.bombCarrier) {
+      this.bombDrop = { x: Transform.x[eid]!, z: Transform.z[eid]! };
+      this.bombCarrier = -1;
+      this.banner = 'BOMB DROPPED';
+    }
+
     const isEnemyWave = this.mode === 'survival' && Team.id[eid] === 2 && hasComponent(this.world, Bot, eid);
     if (isEnemyWave) {
       this.despawnQueue.push({ eid, atTick: this.world.tick + 12 });
@@ -856,7 +890,12 @@ export class GameServer {
     const team = Team.id[eid]!;
     const spawn = this.pickSpawn(team, eid);
     const c = this.clientByEid(eid);
-    if (c) { const g = this.classDefFor(eid).grenades; c.frag = g.frag; c.molotov = g.molotov; c.smoke = g.smoke; }
+    if (c && c.pendingClass) {
+      c.classId = c.pendingClass;
+      c.pendingClass = null;
+      this.applyClass(eid, c.classId);
+    }
+    if (c) { const g = this.grenadeKitFor(eid); c.frag = g.frag; c.molotov = g.molotov; c.smoke = g.smoke; }
     if (this.isDead(eid)) removeComponent(this.world, Dead, eid);
     Transform.x[eid] = spawn.x;
     Transform.y[eid] = 0;
@@ -979,15 +1018,24 @@ export class GameServer {
 
     const sites = this.map.bombSites;
     if (this.bombPhase === 'live') {
-      let plantingHere = -1;
-      for (let i = 0; i < sites.length; i++) {
-        const s = sites[i]!;
-        for (const [, eid] of this.attackers()) {
+      // dropped bomb pickup: any living attacker walking over it becomes carrier
+      if (this.bombCarrier === -1 && this.bombDrop) {
+        for (const [nid, eid] of this.attackers()) {
           if (this.isDead(eid)) continue;
-          const dx = Transform.x[eid]! - s.x, dz = Transform.z[eid]! - s.z;
-          if (dx * dx + dz * dz <= s.radius * s.radius && this.interacting.has(NetId.value[eid]!)) { plantingHere = i; break; }
+          const dx = Transform.x[eid]! - this.bombDrop.x, dz = Transform.z[eid]! - this.bombDrop.z;
+          if (dx * dx + dz * dz < 1.6 * 1.6) { this.bombCarrier = nid; this.bombDrop = null; break; }
         }
-        if (plantingHere >= 0) break;
+      }
+
+      // only the bomb carrier can plant, and only inside a site
+      let plantingHere = -1;
+      const carrierEid = this.netIdToEid.get(this.bombCarrier);
+      if (carrierEid !== undefined && !this.isDead(carrierEid) && this.interacting.has(this.bombCarrier)) {
+        for (let i = 0; i < sites.length; i++) {
+          const s = sites[i]!;
+          const dx = Transform.x[carrierEid]! - s.x, dz = Transform.z[carrierEid]! - s.z;
+          if (dx * dx + dz * dz <= s.radius * s.radius) { plantingHere = i; break; }
+        }
       }
       if (plantingHere >= 0) {
         this.bombPlantProgress += 1;
@@ -996,12 +1044,13 @@ export class GameServer {
           this.bombSiteIndex = plantingHere;
           this.bombPhaseEndTick = tick + BOMB_FUSE_TICKS;
           this.bombDefuseProgress = 0;
+          this.bombCarrier = -1;
           const site = sites[plantingHere]!;
           this.awardZoneScore(1, site.x, site.z, site.radius, SCORE_PLANT);
           this.banner = 'BOMB PLANTED AT ' + site.label;
         }
       } else {
-        this.bombPlantProgress = Math.max(0, this.bombPlantProgress - 1);
+        this.bombPlantProgress = 0; // CS-style: releasing the plant resets it
       }
 
       if (this.alivePlayersOnTeam(1) === 0 && this.aliveAttackerBots() === 0) { this.endBombRound(tick, 2, 'ATTACKERS ELIMINATED'); return; }
@@ -1026,7 +1075,7 @@ export class GameServer {
           return;
         }
       } else {
-        this.bombDefuseProgress = Math.max(0, this.bombDefuseProgress - 1);
+        this.bombDefuseProgress = 0; // CS-style: releasing the defuse resets it
       }
       if (tick >= this.bombPhaseEndTick) {
         // detonation: big blast at the site that hurts everyone near it
@@ -1037,22 +1086,42 @@ export class GameServer {
     }
   }
 
-  private bombObjectiveFor(eid: number): { x: number; z: number; r: number } | null {
+  private nearestSite(eid: number) {
+    const sites = this.map.bombSites;
+    let best = sites[0]!;
+    let bd = Infinity;
+    for (const s of sites) {
+      const d = Math.hypot(Transform.x[eid]! - s.x, Transform.z[eid]! - s.z);
+      if (d < bd) { bd = d; best = s; }
+    }
+    return best;
+  }
+
+  private bombObjectiveFor(eid: number): { x: number; z: number; r: number; interact: boolean } | null {
     const team = Team.id[eid]!;
     const sites = this.map.bombSites;
     if (sites.length === 0) return null;
-    if (this.bombPhase === 'live' && team === 1) {
-      let best = sites[0]!;
-      let bd = Infinity;
-      for (const s of sites) {
-        const d = Math.hypot(Transform.x[eid]! - s.x, Transform.z[eid]! - s.z);
-        if (d < bd) { bd = d; best = s; }
+    const nid = NetId.value[eid]!;
+    if (this.bombPhase === 'live') {
+      if (team === 1) {
+        if (nid === this.bombCarrier) {
+          const s = this.nearestSite(eid);
+          return { x: s.x, z: s.z, r: s.radius, interact: true };
+        }
+        if (this.bombCarrier === -1 && this.bombDrop) {
+          return { x: this.bombDrop.x, z: this.bombDrop.z, r: 0.8, interact: false };
+        }
+        const s = this.nearestSite(eid);
+        return { x: s.x, z: s.z, r: s.radius * 2.4, interact: false }; // escort pressure
       }
-      return { x: best.x, z: best.z, r: best.radius };
+      // defenders hold the sites instead of roaming
+      const s = this.nearestSite(eid);
+      return { x: s.x, z: s.z, r: s.radius * 2.6, interact: false };
     }
-    if (this.bombPhase === 'planted' && team === 2 && this.bombSiteIndex >= 0) {
+    if (this.bombPhase === 'planted' && this.bombSiteIndex >= 0) {
       const s = sites[this.bombSiteIndex]!;
-      return { x: s.x, z: s.z, r: s.radius };
+      if (team === 2) return { x: s.x, z: s.z, r: s.radius, interact: true };
+      return { x: s.x, z: s.z, r: s.radius * 2.2, interact: false }; // attackers protect it
     }
     return null;
   }
@@ -1071,13 +1140,34 @@ export class GameServer {
   }
 
   private startBombRound(tick: number): void {
+    // halftime side swap, like CS: attackers become defenders at the half
+    const limit = this.config.winLimit > 0 ? this.config.winLimit : BOMB_ROUNDS_TO_WIN;
+    const played = this.roundsWon[0] + this.roundsWon[1];
+    let halftime = false;
+    if (!this.sidesSwapped && played >= limit - 1 && played > 0) {
+      this.sidesSwapped = true;
+      halftime = true;
+      for (const eid of transformNetQuery(this.world)) {
+        if (Team.id[eid] === 1) Team.id[eid] = 2;
+        else if (Team.id[eid] === 2) Team.id[eid] = 1;
+      }
+      this.roundsWon = [this.roundsWon[1], this.roundsWon[0]];
+    }
+
     this.bombPhase = 'live';
     this.bombSiteIndex = -1;
     this.bombPlantProgress = 0;
     this.bombDefuseProgress = 0;
     this.bombPhaseEndTick = tick + BOMB_ROUND_TICKS;
-    this.banner = 'ROUND START';
+    this.banner = halftime ? 'HALFTIME — SWITCHING SIDES' : 'ROUND START';
     this.reviveAll();
+
+    // hand the bomb to a random attacker
+    const attackers = [...transformNetQuery(this.world)].filter((e) => Team.id[e] === 1 && !this.isDead(e));
+    this.bombCarrier = attackers.length > 0
+      ? NetId.value[attackers[Math.floor(Math.random() * attackers.length)]!]!
+      : -1;
+    this.bombDrop = null;
   }
 
   private endBombRound(tick: number, winner: number, reason = ''): void {
@@ -1285,12 +1375,17 @@ export class GameServer {
         if (obj) {
           const dx = obj.x - Transform.x[eid]!, dz = obj.z - Transform.z[eid]!;
           const d = Math.hypot(dx, dz) || 0.001;
-          if (d > obj.r * 0.55) {
+          if (obj.interact) {
+            if (d > obj.r * 0.55) {
+              mx = dx / d; mz = dz / d;
+              if (!bi.fire) yaw = Math.atan2(dx, dz);
+            } else {
+              interact = true;
+              if (!bi.fire) { mx = 0; mz = 0; }
+            }
+          } else if (d > obj.r && !bi.fire) {
             mx = dx / d; mz = dz / d;
-            if (!bi.fire) yaw = Math.atan2(dx, dz);
-          } else {
-            interact = true;
-            if (!bi.fire) { mx = 0; mz = 0; }
+            yaw = Math.atan2(dx, dz);
           }
         }
       }
@@ -1402,6 +1497,41 @@ export class GameServer {
     return { x: Transform.x[eid]!, z: Transform.z[eid]! };
   }
 
+  // enemies with actual line of sight inside a sight radius — bots use this
+  // instead of omniscient nearest-target picking
+  visibleEnemiesFor(eid: number, sightRadius: number): { eid: number; dist: number }[] {
+    const myTeam = Team.id[eid]!;
+    const myX = Transform.x[eid]!, myZ = Transform.z[eid]!;
+    const freeForAll = this.isFfaLike();
+    const radius = this.isFog() ? Math.min(sightRadius, VISION_RADIUS) : sightRadius;
+    const r2 = radius * radius;
+    const out: { eid: number; dist: number }[] = [];
+    for (const t of transformNetQuery(this.world)) {
+      if (t === eid || this.isDead(t)) continue;
+      const tt = Team.id[t]!;
+      if (!freeForAll && tt === myTeam) continue;
+      const dx = Transform.x[t]! - myX, dz = Transform.z[t]! - myZ;
+      const d2 = dx * dx + dz * dz;
+      if (d2 > r2) continue;
+      if (!this.hasLineOfSight(eid, t)) continue;
+      out.push({ eid: t, dist: Math.sqrt(d2) });
+    }
+    out.sort((a, b) => a.dist - b.dist);
+    return out;
+  }
+
+  isAlive(eid: number): boolean {
+    return this.netIdToEid.has(NetId.value[eid] ?? -1) && !this.isDead(eid);
+  }
+
+  wallClearance(eid: number, dirX: number, dirZ: number, maxDist: number): number {
+    if (!this.physics) return maxDist;
+    const len = Math.hypot(dirX, dirZ);
+    if (len < 1e-4) return maxDist;
+    const oy = Transform.y[eid]! + PLAYER_HEIGHT * 0.5;
+    return this.physics.raycastStaticDistance(Transform.x[eid]!, oy, Transform.z[eid]!, dirX / len, 0, dirZ / len, maxDist);
+  }
+
   eyeYOf(eid: number): number {
     return Transform.y[eid]! + PLAYER_EYE_HEIGHT;
   }
@@ -1483,6 +1613,8 @@ export class GameServer {
       scoreA: this.teamScores[0], scoreB: this.teamScores[1],
       pointOwners: this.capOwner.slice(), pointProgress: this.capProgress.slice(),
       bombSite: -1, bombProgress: 0, wave: this.wave, enemiesLeft: 0, targetScore: 0,
+      bombCarrier: this.bombCarrier, bombDropped: this.bombDrop !== null,
+      bombDropX: this.bombDrop?.x ?? 0, bombDropZ: this.bombDrop?.z ?? 0,
       ladder: this._mode === 'gungame' ? this.gungameLadder.map(weaponIdToIndex) : [],
     };
 

@@ -56,11 +56,20 @@ export class Minimap {
     }
   }
 
-  update(map: GameMap, mode: GameMode, ms: ModeState, doorMask: number, blips: MinimapBlip[]): void {
+  update(map: GameMap, mode: GameMode, ms: ModeState, doorMask: number, blips: MinimapBlip[], bomb: { x: number; z: number } | null = null): void {
     if (map.id !== this.mapId) this.setMap(map);
     const ctx = this.ctx;
     ctx.clearRect(0, 0, SIZE, SIZE);
     ctx.drawImage(this.staticLayer, 0, 0);
+
+    if (bomb) {
+      ctx.fillStyle = 'rgba(255,170,30,1)';
+      ctx.strokeStyle = 'rgba(0,0,0,0.8)';
+      ctx.lineWidth = 1;
+      const bx = this.px(bomb.x), bz = this.px(bomb.z);
+      ctx.fillRect(bx - 3, bz - 3, 6, 6);
+      ctx.strokeRect(bx - 3, bz - 3, 6, 6);
+    }
 
     for (let i = 0; i < map.doors.length; i++) {
       const d = map.doors[i]!;

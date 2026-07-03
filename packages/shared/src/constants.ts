@@ -24,7 +24,8 @@ export const PLAYER_EYE_HEIGHT = 1.6;
 export const MUZZLE_HEIGHT = 1.15;
 export const AIM_PITCH_LIMIT = 1.2;
 export const GRAVITY = 24;
-export const JUMP_SPEED = 8;
+// apex ~1.76m: crates (1.6) and office desks (1.5) are mountable, walls (2.4) are not
+export const JUMP_SPEED = 9.2;
 export const GROUND_EPSILON = 0.05;
 export const WALL_HEIGHT = 2.4;
 export const PLAYER_MAX_HEALTH = 100;

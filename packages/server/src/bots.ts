@@ -11,21 +11,15 @@ export interface BotOutput {
   reload: boolean;
 }
 
-interface DiffParams {
-  aimError: number;
-  aimLerp: number;
-  reactionTicks: number;
-  fireCone: number;
-  jitterTicks: number;
-}
+// Whole-roster skill band per difficulty; individual bots vary inside it and
+// exactly one bot per controller is the "ace" at the top of the band.
+const DIFFICULTY_SCALE: Record<Difficulty, number> = { easy: 0.55, normal: 0.85, hard: 1.1 };
 
-const DIFFICULTY: Record<Difficulty, DiffParams> = {
-  easy: { aimError: 0.30, aimLerp: 0.13, reactionTicks: 26, fireCone: 0.30, jitterTicks: 8 },
-  normal: { aimError: 0.15, aimLerp: 0.26, reactionTicks: 15, fireCone: 0.26, jitterTicks: 6 },
-  hard: { aimError: 0.06, aimLerp: 0.45, reactionTicks: 8, fireCone: 0.22, jitterTicks: 5 },
-};
+const SIGHT_RADIUS = 26;
+const MEMORY_TICKS = 90;
 
 interface BotState {
+  skill: number;
   moveX: number;
   moveZ: number;
   nextChangeTick: number;
@@ -36,12 +30,20 @@ interface BotState {
   nextStrafeTick: number;
   fireReadyTick: number;
   hadLos: boolean;
+  targetEid: number;
+  lastSeenTick: number;
+  lastSeenX: number;
+  lastSeenZ: number;
   lastX: number;
   lastZ: number;
   stuckTicks: number;
   escapeUntil: number;
   escapeX: number;
   escapeZ: number;
+}
+
+function lerp(a: number, b: number, t: number): number {
+  return a + (b - a) * Math.max(0, Math.min(1, t));
 }
 
 function angleDelta(a: number, b: number): number {
@@ -53,22 +55,45 @@ function angleDelta(a: number, b: number): number {
 
 export class BotController {
   private bots = new Map<number, BotState>();
-  private diff: DiffParams = DIFFICULTY.normal;
+  private scale = DIFFICULTY_SCALE.normal;
+  private aceNetId = -1;
 
   setDifficulty(d: Difficulty): void {
-    this.diff = DIFFICULTY[d] ?? DIFFICULTY.normal;
+    this.scale = DIFFICULTY_SCALE[d] ?? DIFFICULTY_SCALE.normal;
   }
 
   register(netId: number): void {
+    // one ace per roster; everyone else lands in a mediocre-to-decent band
+    let skill: number;
+    if (this.aceNetId === -1 || !this.bots.has(this.aceNetId)) {
+      this.aceNetId = netId;
+      skill = 1.0;
+    } else {
+      skill = 0.35 + Math.random() * 0.4;
+    }
     this.bots.set(netId, {
+      skill,
       moveX: 0, moveZ: 0, nextChangeTick: 0, aimYaw: 0, aimError: 0, nextAimTick: 0,
       strafeDir: 1, nextStrafeTick: 0, fireReadyTick: 0, hadLos: false,
+      targetEid: -1, lastSeenTick: -9999, lastSeenX: 0, lastSeenZ: 0,
       lastX: 0, lastZ: 0, stuckTicks: 0, escapeUntil: 0, escapeX: 0, escapeZ: 0,
     });
   }
 
   unregister(netId: number): void {
     this.bots.delete(netId);
+    if (netId === this.aceNetId) this.aceNetId = -1;
+  }
+
+  private params(b: BotState) {
+    const s = Math.min(1, b.skill * this.scale);
+    return {
+      aimError: lerp(0.34, 0.05, s),
+      aimLerp: lerp(0.12, 0.42, s),
+      reactionTicks: Math.round(lerp(30, 8, s)),
+      fireCone: lerp(0.32, 0.2, s),
+      jitterTicks: Math.round(lerp(9, 5, s)),
+    };
   }
 
   generateInput(netId: number, eid: number, tick: number, server: GameServer): BotOutput {
@@ -76,17 +101,54 @@ export class BotController {
     if (!b) return { moveX: 0, moveZ: 0, aimYaw: 0, aimPitch: 0, fire: false, reload: false };
 
     const me = server.posOf(eid);
-    const target = server.enemyTargetFor(eid);
-    const out = target === null || server.mode === 'practice'
-      ? this.wander(b, tick)
+    const target = server.mode === 'practice' ? null : this.pickTarget(b, eid, tick, server);
+    const out = target === null
+      ? this.seekOrWander(b, eid, tick, server, me)
       : this.combat(b, eid, tick, server, me, target);
 
+    this.avoidWalls(b, eid, server, out);
     this.unstick(b, me, tick, out);
     return out;
   }
 
+  // Bots only acquire what they can actually see, keep a short memory of the
+  // last sighting, and stick to their current target so a whole lobby doesn't
+  // pile onto one player.
+  private pickTarget(b: BotState, eid: number, tick: number, server: GameServer): number | null {
+    // survival waves are a horde — they always know where the players are
+    if (server.mode === 'survival') {
+      const t = server.enemyTargetFor(eid);
+      if (t !== null) {
+        const p = server.posOf(t);
+        b.targetEid = t; b.lastSeenTick = tick; b.lastSeenX = p.x; b.lastSeenZ = p.z;
+      }
+      return t;
+    }
+
+    const visible = server.visibleEnemiesFor(eid, SIGHT_RADIUS);
+
+    const current = visible.find((v) => v.eid === b.targetEid);
+    if (current) {
+      const p = server.posOf(current.eid);
+      b.lastSeenTick = tick; b.lastSeenX = p.x; b.lastSeenZ = p.z;
+      return current.eid;
+    }
+
+    if (visible.length > 0) {
+      // weighted pick among the two nearest spreads aggro across targets
+      const pick = visible.length > 1 && Math.random() < 0.35 ? visible[1]! : visible[0]!;
+      b.targetEid = pick.eid;
+      const p = server.posOf(pick.eid);
+      b.lastSeenTick = tick; b.lastSeenX = p.x; b.lastSeenZ = p.z;
+      return pick.eid;
+    }
+
+    if (b.targetEid !== -1 && tick - b.lastSeenTick > MEMORY_TICKS) b.targetEid = -1;
+    return null;
+  }
+
   private combat(b: BotState, eid: number, tick: number, server: GameServer, me: { x: number; z: number }, target: number): BotOutput {
-    const d = this.diff;
+    const d = this.params(b);
     const tp = server.posOf(target);
     const dx = tp.x - me.x;
     const dz = tp.z - me.z;
@@ -96,7 +158,9 @@ export class BotController {
     const los = server.hasLineOfSight(eid, target);
 
     if (tick >= b.nextAimTick) {
-      b.aimError = (Math.random() - 0.5) * d.aimError * 2;
+      // accuracy degrades with distance — no more cross-map laser bots
+      const distPenalty = 0.55 + (dist / SIGHT_RADIUS) * 0.9;
+      b.aimError = (Math.random() - 0.5) * d.aimError * 2 * distPenalty;
       b.nextAimTick = tick + d.jitterTicks + Math.floor(Math.random() * d.jitterTicks);
     }
     const desiredYaw = Math.atan2(dx, dz) + b.aimError;
@@ -134,6 +198,38 @@ export class BotController {
     }
 
     return { moveX, moveZ, aimYaw: b.aimYaw, aimPitch, fire, reload: false };
+  }
+
+  // no visible target: investigate the last sighting, otherwise wander
+  private seekOrWander(b: BotState, eid: number, tick: number, server: GameServer, me: { x: number; z: number }): BotOutput {
+    if (b.targetEid !== -1 && tick - b.lastSeenTick <= MEMORY_TICKS) {
+      const dx = b.lastSeenX - me.x, dz = b.lastSeenZ - me.z;
+      const d = Math.hypot(dx, dz);
+      if (d > 1.5) {
+        const yaw = Math.atan2(dx, dz);
+        b.aimYaw += angleDelta(yaw, b.aimYaw) * 0.3;
+        return { moveX: dx / d, moveZ: dz / d, aimYaw: b.aimYaw, aimPitch: 0, fire: false, reload: false };
+      }
+      b.targetEid = -1; // reached the last known spot, give up
+    }
+    return this.wander(b, tick);
+  }
+
+  // two whiskers ahead: steer along whichever side is clearer instead of
+  // face-planting into walls
+  private avoidWalls(b: BotState, eid: number, server: GameServer, out: BotOutput): void {
+    const len = Math.hypot(out.moveX, out.moveZ);
+    if (len < 0.1) return;
+    const dx = out.moveX / len, dz = out.moveZ / len;
+    const ahead = server.wallClearance(eid, dx, dz, 1.6);
+    if (ahead >= 1.6) return;
+    const cos = Math.cos(0.9), sin = Math.sin(0.9);
+    const lx = dx * cos - dz * sin, lz = dx * sin + dz * cos;
+    const rx = dx * cos + dz * sin, rz = -dx * sin + dz * cos;
+    const leftClear = server.wallClearance(eid, lx, lz, 2.2);
+    const rightClear = server.wallClearance(eid, rx, rz, 2.2);
+    if (leftClear >= rightClear) { out.moveX = lx * len; out.moveZ = lz * len; }
+    else { out.moveX = rx * len; out.moveZ = rz * len; }
   }
 
   private unstick(b: BotState, me: { x: number; z: number }, tick: number, out: BotOutput): void {

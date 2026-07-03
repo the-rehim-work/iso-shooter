@@ -156,6 +156,10 @@ export interface ModeState {
   pointProgress: number[];
   bombSite: number;
   bombProgress: number;
+  bombCarrier: number;
+  bombDropped: boolean;
+  bombDropX: number;
+  bombDropZ: number;
   wave: number;
   enemiesLeft: number;
   targetScore: number;

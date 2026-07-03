@@ -22,6 +22,7 @@ export interface HudUpdateState {
   myKills: number;
   myDeaths: number;
   myScore: number;
+  myNetId: number;
   mode: GameMode;
   modeState: ModeState;
   myTeam: number;
@@ -232,7 +233,12 @@ export class Hud {
       if (ms.phase === 'warmup') this.objectiveEl.textContent = 'Round starts in ' + t + 's · you are ' + (s.myTeam === 1 ? 'ATTACKING' : 'DEFENDING');
       else if (ms.phase === 'roundEnd') this.objectiveEl.textContent = 'Next round in ' + t + 's';
       else if (ms.phase === 'planted') this.objectiveEl.textContent = (s.myTeam === 2 ? 'DEFUSE — hold E at the site · ' : 'Defend the bomb · ') + t + 's';
-      else this.objectiveEl.textContent = (s.myTeam === 1 ? 'Plant the bomb — hold E at a site · ' : 'Defend the sites · ') + t + 's';
+      else if (s.myTeam === 1) {
+        const role = ms.bombCarrier === s.myNetId ? '⬤ YOU HAVE THE BOMB — plant at a site (E)'
+          : ms.bombDropped ? 'Bomb DROPPED — recover it'
+          : 'Escort the bomb carrier';
+        this.objectiveEl.textContent = role + ' · ' + t + 's';
+      } else this.objectiveEl.textContent = 'Defend the sites · ' + t + 's';
     } else if (s.mode === 'survival') {
       if (ms.phase === 'break') {
         this.scoreEl.textContent = 'Wave ' + ms.wave + ' cleared';

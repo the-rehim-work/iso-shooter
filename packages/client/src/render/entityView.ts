@@ -95,7 +95,8 @@ export class EntityView {
   get isDead(): boolean { return this.wasDead; }
 
   tick(nowMs: number, dt: number, speed: number): void {
-    this.character.update(dt, speed);
+    const airborne = this.mesh.position.y > 0.09;
+    this.character.update(dt, speed, airborne);
 
     if (nowMs < this.hitFlashUntilMs) {
       this.character.bodyMat.emissive.setRGB(0.9, 0.1, 0.05);
