@@ -203,7 +203,7 @@ document.addEventListener('keydown', bootAudio, { once: true });
 
 let classPickerOpen = false;
 window.addEventListener('keydown', (e) => {
-  if (e.key.toLowerCase() === 'c' && !classPickerOpen) {
+  if (e.code === 'KeyC' && !classPickerOpen) {
     classPickerOpen = true;
     void showClassSelect(getSavedClass()).then((cid) => {
       classPickerOpen = false;

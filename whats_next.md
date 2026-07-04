@@ -73,6 +73,12 @@ Sparks only appear at the shooter's tracer endpoint, not at the victim's body. T
 - **Jump has a purpose**: JUMP_SPEED 9.2 (apex ~1.78) — crates (1.6) and desks (1.5) are mountable, walls (2.4) are not; verified landing on a crate. Jump poses: procedural model tucks legs, GLTF soldier leans back with anims faded.
 - **Music v2**: 16-bar arrangement with sectional dynamics (sparse → build → climax → recede), generated-IR hall reverb, 3-osc vibrato string ensemble instead of raw saws, formant "ah" choir layer, varied percussion, two alternating melody phrases (octave lift at the climax), 66bpm.
 
+## Resolved in Knife/Input/Corpse/Warrens pass (2026-07-04)
+- **Knife**: semi-auto (click per swing), 14-tick cadence, melee never crits (flat 62 — two hits vs 105hp); both character models play a windup→slash→recover swing (0.42s) instead of a recoil pop.
+- **Input**: all keybinds use `e.code` (physical positions) — WASD/R/Q/E/C/T/digits/Space/Tab work on any keyboard layout; arrow keys also move.
+- **Corpse collision bug**: dead bodies kept their physics capsule server-side (client predicted through, server pushed back → rubber-band). `killEntity` now drops the capsule; respawn re-adds it. Verified: walking through a fresh corpse is perfectly smooth.
+- **New map "Warrens"**: corridor maze — ring corridor at ±18 with N/S doors, pinwheel core making spiral hallways, corner fights everywhere; 3 control points, 2 bomb sites (center + NE ring corner), per-map spawns in the outer corridor. Verified: door gaps clean, spawns clear, 600-tick bot match with nobody wall-stuck.
+
 ## Next logical features (in priority order)
 
 1. **Lobby polish** — pre-game waiting room listing connected players before the host starts; today the host's room-setup dialog fills this role.

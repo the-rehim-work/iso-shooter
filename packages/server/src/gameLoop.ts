@@ -778,8 +778,9 @@ export class GameServer {
 
       const hitY = oy + dirY * bestDist;
       const zone = (hitY - bestFeetY) / PLAYER_HEIGHT;
-      const crit = zone >= HEAD_ZONE_FRACTION;
-      const mult = crit ? CRIT_MULTIPLIER : zone <= LEG_ZONE_FRACTION ? GRAZE_MULTIPLIER : 1;
+      // melee swings hit flat — no headshot crits from hovering the cursor
+      const crit = !def.melee && zone >= HEAD_ZONE_FRACTION;
+      const mult = def.melee ? 1 : crit ? CRIT_MULTIPLIER : zone <= LEG_ZONE_FRACTION ? GRAZE_MULTIPLIER : 1;
 
       const hx = ox + dirX * bestDist;
       const hz = oz + dirZ * bestDist;
@@ -830,6 +831,8 @@ export class GameServer {
     addComponent(this.world, Dead, eid);
     Dead.respawnTick[eid] = this.world.tick + this.respawnTicksFor(eid);
     this.streaks.set(netId, 0);
+    // corpses don't block: drop the physics capsule now, respawn re-adds it
+    this.physics?.removeCharacter(netId);
 
     if (this.mode === 'bomb' && this.bombPhase === 'live' && netId === this.bombCarrier) {
       this.bombDrop = { x: Transform.x[eid]!, z: Transform.z[eid]! };

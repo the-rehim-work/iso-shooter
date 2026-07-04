@@ -52,8 +52,8 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
     id: 'dmr', name: 'Marksman', damage: 36, fireIntervalTicks: 12, magSize: 15,
     numMags: 4, reloadTicks: 51, range: 72, falloff: 0.7, pellets: 1, spread: 0.008, automatic: false, muzzleSpeed: 1, recoil: 0.5, melee: false },
   knife: {
-    id: 'knife', name: 'Combat Knife', damage: 62, fireIntervalTicks: 6, magSize: 1,
-    numMags: 1, reloadTicks: 0, range: 3.0, falloff: 1, pellets: 1, spread: 0, automatic: true, muzzleSpeed: 1, recoil: 0.06, melee: true },
+    id: 'knife', name: 'Combat Knife', damage: 62, fireIntervalTicks: 14, magSize: 1,
+    numMags: 1, reloadTicks: 0, range: 3.0, falloff: 1, pellets: 1, spread: 0, automatic: false, muzzleSpeed: 1, recoil: 0.06, melee: true },
   revolver: {
     id: 'revolver', name: 'Magnum', damage: 52, fireIntervalTicks: 16, magSize: 6,
     numMags: 4, reloadTicks: 55, range: 42, falloff: 0.6, pellets: 1, spread: 0.012, automatic: false, muzzleSpeed: 1, recoil: 0.55, melee: false },

@@ -28,6 +28,7 @@ export class CharacterModel {
 
   private walkPhase = 0;
   private recoil = 0;
+  private swingTime = 0;
   private hitTime = 0;
   private reloadTime = 0;
   private reloadDur = 1;
@@ -195,7 +196,10 @@ export class CharacterModel {
     (this.gunBody.material as THREE.MeshStandardMaterial).color.setHex(isKnife ? 0x2a2320 : p.color);
   }
 
-  triggerShoot(): void { this.recoil = 1; }
+  triggerShoot(): void {
+    if (this.weaponId === 7) this.swingTime = 0.42;
+    else this.recoil = 1;
+  }
   triggerHit(): void { this.hitTime = 0.3; }
   triggerReload(durationSec: number): void { this.reloadTime = Math.max(0.3, durationSec); this.reloadDur = this.reloadTime; }
 
@@ -266,6 +270,19 @@ export class CharacterModel {
     this.recoil = Math.max(0, this.recoil - dt * 9);
     this.gunPivot.position.z = 0.16 - this.recoil * 0.1;
     this.rArm.rotation.x = -0.38 + this.recoil * 0.25;
+    this.gunPivot.rotation.x = 0;
+
+    if (this.swingTime > 0) {
+      // knife swing: raise back, slash through, recover — matches the 14-tick cadence
+      this.swingTime = Math.max(0, this.swingTime - dt);
+      const p = 1 - this.swingTime / 0.42;
+      let arm: number;
+      if (p < 0.3) arm = -0.38 + (p / 0.3) * 0.6;
+      else if (p < 0.7) arm = 0.22 - ((p - 0.3) / 0.4) * 1.9;
+      else arm = -1.68 + ((p - 0.7) / 0.3) * 1.3;
+      this.rArm.rotation.x = arm;
+      this.gunPivot.rotation.x = (arm + 0.38) * 0.8;
+    }
 
     if (this.reloadTime > 0) {
       this.reloadTime -= dt;

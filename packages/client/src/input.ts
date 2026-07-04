@@ -10,23 +10,25 @@ export class InputSampler {
   scoreboardHeld = false;
 
   constructor(target: HTMLElement) {
+    // e.code is the physical key position — WASD works on AZERTY, Cyrillic,
+    // or any other layout
     window.addEventListener('keydown', (e) => {
-      const k = e.key.toLowerCase();
+      const k = e.code;
       this.keys.add(k);
-      if (k === 'r') this.reloadPressed = true;
-      if (k === '1') this.switchQueued = 0;
-      if (k === '2') this.switchQueued = 1;
-      if (k === 'q') this.switchQueued = 2;
-      if (k === '3') this.throwQueued = 1;
-      if (k === '4') this.throwQueued = 2;
-      if (k === '5') this.throwQueued = 3;
-      if (k === 't') this.teamSwitchPressed = true;
-      if (k === 'tab') { this.scoreboardHeld = true; e.preventDefault(); }
+      if (k === 'KeyR') this.reloadPressed = true;
+      if (k === 'Digit1') this.switchQueued = 0;
+      if (k === 'Digit2') this.switchQueued = 1;
+      if (k === 'KeyQ') this.switchQueued = 2;
+      if (k === 'Digit3') this.throwQueued = 1;
+      if (k === 'Digit4') this.throwQueued = 2;
+      if (k === 'Digit5') this.throwQueued = 3;
+      if (k === 'KeyT') this.teamSwitchPressed = true;
+      if (k === 'Tab') { this.scoreboardHeld = true; e.preventDefault(); }
     });
     window.addEventListener('keyup', (e) => {
-      const k = e.key.toLowerCase();
+      const k = e.code;
       this.keys.delete(k);
-      if (k === 'tab') this.scoreboardHeld = false;
+      if (k === 'Tab') this.scoreboardHeld = false;
     });
     target.addEventListener('mousemove', (e) => {
       this.mouseX = e.clientX;
@@ -48,10 +50,10 @@ export class InputSampler {
   axis(): { forward: number; strafe: number } {
     let forward = 0;
     let strafe = 0;
-    if (this.keys.has('w')) forward += 1;
-    if (this.keys.has('s')) forward -= 1;
-    if (this.keys.has('d')) strafe += 1;
-    if (this.keys.has('a')) strafe -= 1;
+    if (this.keys.has('KeyW') || this.keys.has('ArrowUp')) forward += 1;
+    if (this.keys.has('KeyS') || this.keys.has('ArrowDown')) forward -= 1;
+    if (this.keys.has('KeyD') || this.keys.has('ArrowRight')) strafe += 1;
+    if (this.keys.has('KeyA') || this.keys.has('ArrowLeft')) strafe -= 1;
     return { forward, strafe };
   }
 
@@ -60,11 +62,11 @@ export class InputSampler {
   }
 
   get interact(): boolean {
-    return this.keys.has('e');
+    return this.keys.has('KeyE');
   }
 
   get jump(): boolean {
-    return this.keys.has(' ');
+    return this.keys.has('Space');
   }
 
   consumeReload(): boolean {

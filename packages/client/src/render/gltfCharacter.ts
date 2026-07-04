@@ -83,6 +83,8 @@ export class SoldierModel {
   private materials: THREE.Material[] = [];
 
   private recoil = 0;
+  private swingTime = 0;
+  private weaponId = 2;
   private hitTime = 0;
   private reloadTime = 0;
   private reloadDur = 1;
@@ -135,10 +137,14 @@ export class SoldierModel {
   }
 
   setWeapon(weaponId: number): void {
+    this.weaponId = weaponId;
     this.gun.setWeapon(weaponId);
   }
 
-  triggerShoot(): void { this.recoil = 1; }
+  triggerShoot(): void {
+    if (this.weaponId === 7) this.swingTime = 0.42;
+    else this.recoil = 1;
+  }
   triggerHit(): void { this.hitTime = 0.3; }
   triggerReload(durationSec: number): void { this.reloadTime = Math.max(0.3, durationSec); this.reloadDur = this.reloadTime; }
 
@@ -194,6 +200,14 @@ export class SoldierModel {
 
     this.recoil = Math.max(0, this.recoil - dt * 9);
     this.gun.pivot.position.z = 0.16 - this.recoil * 0.1;
+    this.gun.pivot.rotation.x = 0;
+
+    if (this.swingTime > 0) {
+      this.swingTime = Math.max(0, this.swingTime - dt);
+      const p = 1 - this.swingTime / 0.42;
+      const arc = p < 0.3 ? (p / 0.3) * 0.5 : p < 0.7 ? 0.5 - ((p - 0.3) / 0.4) * 1.8 : -1.3 + ((p - 0.7) / 0.3) * 1.3;
+      this.gun.pivot.rotation.x = arc;
+    }
 
     if (this.reloadTime > 0) {
       this.reloadTime -= dt;

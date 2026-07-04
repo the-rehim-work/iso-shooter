@@ -212,6 +212,76 @@ export const OFFICE_MAP: GameMap = {
   },
 };
 
+// ── Warrens — corridor maze ──────────────────────────────────────────────────
+// A ring corridor around a pinwheel core: every fight happens at a corner or
+// down a hallway. Doors guard the north/south entries into the ring.
+
+const WARRENS_COVER: ThemedCover[] = [
+  // ring walls at ±18 with north/south door gaps (x -4..4) and open east/west gaps (z -4..4)
+  { x: -11, z: 18, halfW: 7, halfD: WALL, halfH: INNER_WALL_HALF_H, kind: 'wall' },
+  { x: 11, z: 18, halfW: 7, halfD: WALL, halfH: INNER_WALL_HALF_H, kind: 'wall' },
+  { x: -11, z: -18, halfW: 7, halfD: WALL, halfH: INNER_WALL_HALF_H, kind: 'wall' },
+  { x: 11, z: -18, halfW: 7, halfD: WALL, halfH: INNER_WALL_HALF_H, kind: 'wall' },
+  { x: -18, z: -11, halfW: WALL, halfD: 7, halfH: INNER_WALL_HALF_H, kind: 'wall' },
+  { x: -18, z: 11, halfW: WALL, halfD: 7, halfH: INNER_WALL_HALF_H, kind: 'wall' },
+  { x: 18, z: -11, halfW: WALL, halfD: 7, halfH: INNER_WALL_HALF_H, kind: 'wall' },
+  { x: 18, z: 11, halfW: WALL, halfD: 7, halfH: INNER_WALL_HALF_H, kind: 'wall' },
+
+  // pinwheel core: four rotationally symmetric arms make spiral corridors
+  { x: -8, z: 4, halfW: 6, halfD: WALL, halfH: INNER_WALL_HALF_H, kind: 'wall' },
+  { x: 8, z: -4, halfW: 6, halfD: WALL, halfH: INNER_WALL_HALF_H, kind: 'wall' },
+  { x: -4, z: -8, halfW: WALL, halfD: 6, halfH: INNER_WALL_HALF_H, kind: 'wall' },
+  { x: 4, z: 8, halfW: WALL, halfD: 6, halfH: INNER_WALL_HALF_H, kind: 'wall' },
+
+  // cover crates: door approaches, quadrant corridors, center
+  { x: 6, z: 22, halfW: 1.1, halfD: 1.1, halfH: CRATE_HALF_H, kind: 'crate' },
+  { x: -6, z: -22, halfW: 1.1, halfD: 1.1, halfH: CRATE_HALF_H, kind: 'crate' },
+  { x: 22, z: 6, halfW: 1.0, halfD: 1.0, halfH: CRATE_HALF_H, kind: 'crate' },
+  { x: -22, z: -6, halfW: 1.0, halfD: 1.0, halfH: CRATE_HALF_H, kind: 'crate' },
+  { x: 10, z: 10, halfW: 1.2, halfD: 1.2, halfH: CRATE_HALF_H, kind: 'crate' },
+  { x: -10, z: -10, halfW: 1.2, halfD: 1.2, halfH: CRATE_HALF_H, kind: 'crate' },
+  { x: 0, z: 0, halfW: 1.3, halfD: 1.3, halfH: CRATE_HALF_H, kind: 'crate' },
+  { x: -12, z: 12, halfW: 0.9, halfD: 0.9, halfH: CRATE_HALF_H, kind: 'crate' },
+  { x: 12, z: -12, halfW: 0.9, halfD: 0.9, halfH: CRATE_HALF_H, kind: 'crate' },
+];
+
+const WARRENS_DOORS: DoorDef[] = [
+  { x: 0, z: 18, halfW: 4, halfD: WALL, halfH: 0.9, axis: 'x' },
+  { x: 0, z: -18, halfW: 4, halfD: WALL, halfH: 0.9, axis: 'x' },
+];
+
+export const WARRENS_MAP: GameMap = {
+  id: 'warrens',
+  name: 'Warrens',
+  theme: 'industrial',
+  cover: WARRENS_COVER,
+  doors: WARRENS_DOORS,
+  controlPoints: [
+    { id: 'A', label: 'A', x: -11, z: -11, radius: 4 },
+    { id: 'B', label: 'B', x: 0, z: 0, radius: 4 },
+    { id: 'C', label: 'C', x: 11, z: 11, radius: 4 },
+  ],
+  bombSites: [
+    { id: 'A', label: 'A', x: 0, z: 0, radius: 3.4 },
+    { id: 'B', label: 'B', x: 23, z: 23, radius: 3.2 },
+  ],
+  spawns: {
+    any: [
+      { x: -26, z: -26 }, { x: 0, z: -26 }, { x: 26, z: -26 }, { x: -26, z: 0 },
+      { x: 26, z: 0 }, { x: -26, z: 26 }, { x: 0, z: 26 }, { x: 26, z: 26 },
+      { x: 14, z: -26 }, { x: -14, z: 26 }, { x: 26, z: 14 }, { x: -26, z: -14 },
+    ],
+    team1: [
+      { x: -26, z: -24 }, { x: -26, z: -8 }, { x: -26, z: 8 }, { x: -26, z: 24 },
+      { x: -24, z: -16 }, { x: -24, z: 16 }, { x: -26, z: 0 }, { x: -22, z: -26 },
+    ],
+    team2: [
+      { x: 26, z: -24 }, { x: 26, z: -8 }, { x: 26, z: 8 }, { x: 26, z: 24 },
+      { x: 24, z: -16 }, { x: 24, z: 16 }, { x: 26, z: 0 }, { x: 22, z: 26 },
+    ],
+  },
+};
+
 export const EMPTY_MAP: GameMap = {
   id: 'empty',
   name: 'Proving Ground',
@@ -227,6 +297,7 @@ export const DEFAULT_MAP = COMPOUND_MAP;
 export const MAPS: Record<string, GameMap> = {
   compound: COMPOUND_MAP,
   office: OFFICE_MAP,
+  warrens: WARRENS_MAP,
   empty: EMPTY_MAP,
 };
 
