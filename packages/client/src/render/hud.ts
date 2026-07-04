@@ -1,4 +1,4 @@
-import { MODE_NAMES, type GameMode, type ModeState } from '@iso/shared';
+import { MODE_NAMES, FFA_LIKE_MODES, type GameMode, type ModeState } from '@iso/shared';
 
 export interface ScoreRow {
   name: string;
@@ -214,7 +214,13 @@ export class Hud {
 
   private renderObjective(s: HudUpdateState): void {
     const ms = s.modeState;
-    if (s.mode === 'ffa') {
+    if (s.mode === 'chosen') {
+      this.scoreEl.textContent = 'Leader ' + ms.scoreA + ' / ' + ms.targetScore;
+      const left = Math.ceil(ms.chosenLeftTicks / 30);
+      if (ms.chosen === s.myNetId) this.objectiveEl.textContent = '⚡ YOU ARE THE CHOSEN — IMMORTAL ' + left + 's';
+      else if (ms.chosen >= 0) this.objectiveEl.textContent = 'The Chosen walks — immortal for ' + left + 's';
+      else this.objectiveEl.textContent = 'You: ' + s.myKills + ' K · ' + s.myDeaths + ' D · ' + s.myScore + ' pts';
+    } else if (FFA_LIKE_MODES.includes(s.mode) && s.mode !== 'gungame') {
       this.scoreEl.textContent = 'Leader ' + ms.scoreA + ' / ' + ms.targetScore;
       this.objectiveEl.textContent = 'You: ' + s.myKills + ' K · ' + s.myDeaths + ' D · ' + s.myScore + ' pts';
     } else if (s.mode === 'gungame') {

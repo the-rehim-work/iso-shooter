@@ -46,8 +46,8 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
     id: 'sniper', name: 'Sniper', damage: 92, fireIntervalTicks: 30, magSize: 5,
     numMags: 4, reloadTicks: 70, range: 130, falloff: 0.9, pellets: 1, spread: 0.003, automatic: false, muzzleSpeed: 1, recoil: 1.0, melee: false },
   lmg: {
-    id: 'lmg', name: 'LMG', damage: 21, fireIntervalTicks: 4, magSize: 75,
-    numMags: 3, reloadTicks: 84, range: 52, falloff: 0.5, pellets: 1, spread: 0.05, automatic: true, muzzleSpeed: 1, recoil: 0.2, melee: false },
+    id: 'lmg', name: 'LMG', damage: 19, fireIntervalTicks: 5, magSize: 75,
+    numMags: 3, reloadTicks: 96, range: 50, falloff: 0.5, pellets: 1, spread: 0.06, automatic: true, muzzleSpeed: 1, recoil: 0.24, melee: false },
   dmr: {
     id: 'dmr', name: 'Marksman', damage: 36, fireIntervalTicks: 12, magSize: 15,
     numMags: 4, reloadTicks: 51, range: 72, falloff: 0.7, pellets: 1, spread: 0.008, automatic: false, muzzleSpeed: 1, recoil: 0.5, melee: false },
@@ -98,12 +98,12 @@ export const CLASSES: Record<ClassId, ClassDef> = {
     secondary: 'pistol', maxHealth: 90, speedMul: 1.25, grenades: { frag: 1, molotov: 0, smoke: 1 },
   },
   heavy: {
-    id: 'heavy', name: 'Heavy', blurb: 'Tanky LMG suppressor, slow', primary: 'lmg',
-    secondary: 'pistol', maxHealth: 145, speedMul: 0.84, grenades: { frag: 1, molotov: 1, smoke: 0 },
+    id: 'heavy', name: 'Heavy', blurb: 'Tanky LMG suppressor, very slow', primary: 'lmg',
+    secondary: 'pistol', maxHealth: 145, speedMul: 0.8, grenades: { frag: 1, molotov: 1, smoke: 0 },
   },
   ronin: {
-    id: 'ronin', name: 'Ronin', blurb: 'Blazing melee duelist with a magnum', primary: 'knife',
-    secondary: 'revolver', maxHealth: 110, speedMul: 1.38, grenades: { frag: 0, molotov: 1, smoke: 2 },
+    id: 'ronin', name: 'Ronin', blurb: 'Assassin: backstabs kill, smokes to close in', primary: 'knife',
+    secondary: 'revolver', maxHealth: 105, speedMul: 1.42, grenades: { frag: 0, molotov: 0, smoke: 3 },
   },
   demolition: {
     id: 'demolition', name: 'Demolition', blurb: 'Close-range explosives specialist', primary: 'shotgun',

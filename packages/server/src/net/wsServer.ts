@@ -1,6 +1,22 @@
 import { WebSocketServer, WebSocket } from 'ws';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { MSG, encode, decode, getMap, CollisionWorld, type ClientToServer, type MatchConfig } from '@iso/shared';
 import { GameServer } from '../gameLoop.js';
+
+const STATS_DIR = process.env['STATS_DIR'] ?? 'stats';
+
+function writeMatchStats(roomCode: string, summary: Record<string, unknown>): void {
+  try {
+    mkdirSync(STATS_DIR, { recursive: true });
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const file = join(STATS_DIR, `match-${stamp}-${roomCode}.json`);
+    writeFileSync(file, JSON.stringify(summary, null, 2));
+    console.log(`[stats] wrote ${file}`);
+  } catch (err) {
+    console.error('[stats] failed to write match stats:', err);
+  }
+}
 
 const CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 export const LOBBY_CODE = 'LOBBY';
@@ -9,6 +25,7 @@ interface Room {
   code: string;
   game: GameServer;
   sockets: Map<number, WebSocket>;
+  statsWritten: boolean;
 }
 
 export class IsoWsServer {
@@ -43,7 +60,7 @@ export class IsoWsServer {
     const game = new GameServer(config.mode);
     game.setPhysics(new CollisionWorld(getMap(config.map)));
     game.applyConfig(config);
-    const room: Room = { code, game, sockets: new Map() };
+    const room: Room = { code, game, sockets: new Map(), statsWritten: false };
     this.rooms.set(code, room);
     console.log(`[room ${code}] created (${config.mode} on ${config.map})`);
     return room;
@@ -109,6 +126,10 @@ export class IsoWsServer {
       room.sockets.delete(clientId);
       console.log(`[room ${room.code}] client ${clientId} disconnected`);
       if (room.sockets.size === 0) {
+        // capture an abandoned match too, if it saw any play
+        if (!room.statsWritten && room.game.world.tick > 30 * 30) {
+          writeMatchStats(room.code, { ...room.game.getMatchSummary(), abandoned: true });
+        }
         room.game.dispose();
         this.rooms.delete(room.code);
         console.log(`[room ${room.code}] empty — closed`);
@@ -133,6 +154,13 @@ export class IsoWsServer {
     const hits = game.consumeHits();
     const doors = game.getDoorMask();
     const mode = game.getModeState();
+
+    if (mode.matchPhase === 'ended' && !room.statsWritten) {
+      room.statsWritten = true;
+      writeMatchStats(room.code, game.getMatchSummary());
+    } else if (mode.matchPhase === 'live' && room.statsWritten) {
+      room.statsWritten = false; // host started a fresh match
+    }
     const projectiles = game.getProjectiles();
     const zones = game.getZones();
     const blasts = game.consumeBlasts();

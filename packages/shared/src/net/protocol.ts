@@ -160,6 +160,8 @@ export interface ModeState {
   bombDropped: boolean;
   bombDropX: number;
   bombDropZ: number;
+  chosen: number;
+  chosenLeftTicks: number;
   wave: number;
   enemiesLeft: number;
   targetScore: number;

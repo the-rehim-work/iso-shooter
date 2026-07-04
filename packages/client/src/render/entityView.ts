@@ -7,6 +7,7 @@ export class EntityView {
   private character: CharacterModel | SoldierModel;
   private hitFlashUntilMs = 0;
   private wasDead = false;
+  private chosen = false;
   private nameTag: THREE.Sprite | null = null;
   private nameText = '';
   private nameColor = '#ffffff';
@@ -23,6 +24,10 @@ export class EntityView {
     if (color === this.bodyColor) return;
     this.bodyColor = color;
     this.character.setBodyColor(color);
+  }
+
+  setChosen(chosen: boolean): void {
+    this.chosen = chosen;
   }
 
   setWeapon(weaponId: number): void {
@@ -101,6 +106,10 @@ export class EntityView {
     if (nowMs < this.hitFlashUntilMs) {
       this.character.bodyMat.emissive.setRGB(0.9, 0.1, 0.05);
       this.character.bodyMat.emissiveIntensity = 0.7;
+    } else if (this.chosen) {
+      // golden immortality pulse
+      this.character.bodyMat.emissive.setRGB(1.0, 0.75, 0.15);
+      this.character.bodyMat.emissiveIntensity = 0.35 + 0.25 * Math.sin(nowMs / 130);
     } else {
       this.character.bodyMat.emissiveIntensity = 0;
     }

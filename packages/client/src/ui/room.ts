@@ -37,7 +37,7 @@ function toggle(value: boolean): HTMLInputElement {
 
 function winLabelFor(m: GameMode): string {
   switch (m) {
-    case 'ffa': case 'firefight': case 'blackout': return 'Kills to win';
+    case 'ffa': case 'firefight': case 'blackout': case 'chosen': return 'Kills to win';
     case 'tdm': return 'Team score to win';
     case 'domination': return 'Score target';
     case 'bomb': return 'Rounds to win';
@@ -51,6 +51,7 @@ function modeNote(m: GameMode): string {
     case 'survival': return 'Co-op vs escalating enemy waves — survive as long as possible.';
     case 'practice': return 'Free sandbox with target dummies. No win condition.';
     case 'blackout': return 'Fog of war — you only see your line of sight.';
+    case 'chosen': return 'Every 20s one player becomes immortal for 10s. Repeat picks are rare.';
     default: return '';
   }
 }

@@ -247,6 +247,7 @@ function emptyModeState(): ModeState {
     pointOwners: [], pointProgress: [], bombSite: -1, bombProgress: 0,
     wave: 0, enemiesLeft: 0, targetScore: 0, ladder: [],
     bombCarrier: -1, bombDropped: false, bombDropX: 0, bombDropZ: 0,
+    chosen: -1, chosenLeftTicks: 0,
   };
 }
 
@@ -861,6 +862,7 @@ function frame(now: number): void {
 
   const nowMs = performance.now();
   for (const [netId, view] of views) {
+    view.setChosen(netId === modeState.chosen);
     view.tick(nowMs, dt, entitySpeeds.get(netId) ?? 0);
   }
 

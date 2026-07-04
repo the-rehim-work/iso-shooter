@@ -78,7 +78,12 @@ import {
   SURVIVAL_WAVE_BREAK_TICKS,
   FFA_SCORE_TARGET,
   FOG_MODES,
+  FFA_LIKE_MODES,
   VISION_RADIUS,
+  CHOSEN_INTERVAL_TICKS,
+  CHOSEN_DURATION_TICKS,
+  CHOSEN_REPEAT_WEIGHT,
+  BACKSTAB_MULTIPLIER,
   defaultMatchConfig,
   defaultWinLimit,
   MODE_NAMES,
@@ -231,6 +236,15 @@ export class GameServer {
   private banner = '';
   private gungameLadder: WeaponId[] = GUNGAME_LADDER.slice();
 
+  private chosenNetId = -1;
+  private chosenUntilTick = 0;
+  private nextChosenTick = 0;
+  private timesChosen = new Map<number, number>();
+
+  private statDamage = new Map<number, number>();
+  private statKillWeapon = new Map<string, number>();
+  private matchStartTick = 0;
+
   constructor(mode: GameMode = 'ffa') {
     this.world = createGameWorld();
     this._mode = mode;
@@ -291,6 +305,13 @@ export class GameServer {
     this.damageLog.clear();
     this.streaks.clear();
     this.shuffleLadder();
+    this.chosenNetId = -1;
+    this.chosenUntilTick = 0;
+    this.nextChosenTick = this.world.tick + 30 * 8;
+    this.timesChosen.clear();
+    this.statDamage.clear();
+    this.statKillWeapon.clear();
+    this.matchStartTick = this.world.tick;
 
     this.teamScores = [0, 0];
     this.roundsWon = [0, 0];
@@ -372,7 +393,7 @@ export class GameServer {
   }
 
   private isFfaLike(): boolean {
-    return this.mode === 'ffa' || this.mode === 'gungame' || this.mode === 'firefight' || this.mode === 'blackout';
+    return FFA_LIKE_MODES.includes(this.mode);
   }
 
   private isFog(): boolean {
@@ -778,9 +799,18 @@ export class GameServer {
 
       const hitY = oy + dirY * bestDist;
       const zone = (hitY - bestFeetY) / PLAYER_HEIGHT;
-      // melee swings hit flat — no headshot crits from hovering the cursor
-      const crit = !def.melee && zone >= HEAD_ZONE_FRACTION;
-      const mult = def.melee ? 1 : crit ? CRIT_MULTIPLIER : zone <= LEG_ZONE_FRACTION ? GRAZE_MULTIPLIER : 1;
+      // melee swings hit flat — no headshot crits from hovering the cursor —
+      // but a strike from behind the victim is a backstab and hits like a truck
+      let crit = !def.melee && zone >= HEAD_ZONE_FRACTION;
+      let mult = def.melee ? 1 : crit ? CRIT_MULTIPLIER : zone <= LEG_ZONE_FRACTION ? GRAZE_MULTIPLIER : 1;
+      if (def.melee) {
+        const facingX = Math.sin(Transform.yaw[bestEid]!);
+        const facingZ = Math.cos(Transform.yaw[bestEid]!);
+        if (facingX * dirX + facingZ * dirZ > 0.45) {
+          mult = BACKSTAB_MULTIPLIER;
+          crit = true;
+        }
+      }
 
       const hx = ox + dirX * bestDist;
       const hz = oz + dirZ * bestDist;
@@ -792,6 +822,7 @@ export class GameServer {
       }
       const dmg = Math.max(1, Math.round(def.damage * mult * fo));
       const fatal = this.damageEntity(bestEid, dmg, h.shooterNetId, crit);
+      if (fatal) this.statKillWeapon.set(def.id, (this.statKillWeapon.get(def.id) ?? 0) + 1);
       if (this.hitBuffer.length < 40) this.hitBuffer.push({ x: hx, z: hz, fatal, crit, dmg });
     }
   }
@@ -800,6 +831,7 @@ export class GameServer {
     const prev = Health.current[targetEid]!;
     if (prev <= 0) return false;
     const targetNetId = NetId.value[targetEid]!;
+    if (this.isImmortal(targetNetId)) return false;
     if (shooterNetId !== targetNetId) {
       let log = this.damageLog.get(targetNetId);
       if (!log) { log = new Map(); this.damageLog.set(targetNetId, log); }
@@ -807,6 +839,9 @@ export class GameServer {
     }
     const next = Math.max(0, prev - dmg);
     Health.current[targetEid] = next;
+    if (shooterNetId !== targetNetId) {
+      this.statDamage.set(shooterNetId, (this.statDamage.get(shooterNetId) ?? 0) + (prev - next));
+    }
     if (next === 0) {
       this.killEntity(targetEid, targetNetId, shooterNetId, crit);
       return true;
@@ -1205,6 +1240,35 @@ export class GameServer {
     this.banner = 'WAVE ' + this.wave;
   }
 
+  // weighted anointment: past picks decay hard so the crown moves around
+  private updateChosen(tick: number): void {
+    if (tick < this.nextChosenTick) return;
+    const candidates = [...transformNetQuery(this.world)].filter((e) => !this.isDead(e));
+    if (candidates.length === 0) { this.nextChosenTick = tick + 60; return; }
+    let total = 0;
+    const weights = candidates.map((e) => {
+      const w = Math.pow(CHOSEN_REPEAT_WEIGHT, this.timesChosen.get(NetId.value[e]!) ?? 0);
+      total += w;
+      return w;
+    });
+    let r = Math.random() * total;
+    let idx = candidates.length - 1;
+    for (let i = 0; i < weights.length; i++) {
+      r -= weights[i]!;
+      if (r <= 0) { idx = i; break; }
+    }
+    const nid = NetId.value[candidates[idx]!]!;
+    this.chosenNetId = nid;
+    this.chosenUntilTick = tick + CHOSEN_DURATION_TICKS;
+    this.timesChosen.set(nid, (this.timesChosen.get(nid) ?? 0) + 1);
+    this.nextChosenTick = tick + CHOSEN_INTERVAL_TICKS;
+    this.banner = this.nameFor(nid).toUpperCase() + ' IS THE CHOSEN ONE';
+  }
+
+  private isImmortal(netId: number): boolean {
+    return this.mode === 'chosen' && netId === this.chosenNetId && this.world.tick < this.chosenUntilTick;
+  }
+
   private interacting = new Set<number>();
 
   private tryThrow(c: ClientState, tick: number, type: number, tx: number, tz: number): void {
@@ -1255,6 +1319,7 @@ export class GameServer {
       const dmg = falloff ? Math.round(maxDmg * (1 - dd / radius)) : maxDmg;
       if (dmg <= 0) continue;
       const fatal = this.damageEntity(eid, dmg, ownerNetId, false);
+      if (fatal) this.statKillWeapon.set('explosive', (this.statKillWeapon.get('explosive') ?? 0) + 1);
       if (report && this.hitBuffer.length < 40) this.hitBuffer.push({ x: ex, z: ez, fatal, crit: false, dmg });
     }
   }
@@ -1416,6 +1481,7 @@ export class GameServer {
       if (this.mode === 'domination') this.updateDomination();
       else if (this.mode === 'bomb') this.updateBomb(tick);
       else if (this.mode === 'survival') this.updateSurvival(tick);
+      else if (this.mode === 'chosen') this.updateChosen(tick);
       this.checkWin(tick);
     }
 
@@ -1618,6 +1684,8 @@ export class GameServer {
       bombSite: -1, bombProgress: 0, wave: this.wave, enemiesLeft: 0, targetScore: 0,
       bombCarrier: this.bombCarrier, bombDropped: this.bombDrop !== null,
       bombDropX: this.bombDrop?.x ?? 0, bombDropZ: this.bombDrop?.z ?? 0,
+      chosen: this.world.tick < this.chosenUntilTick ? this.chosenNetId : -1,
+      chosenLeftTicks: Math.max(0, this.chosenUntilTick - this.world.tick),
       ladder: this._mode === 'gungame' ? this.gungameLadder.map(weaponIdToIndex) : [],
     };
 
@@ -1645,6 +1713,36 @@ export class GameServer {
       base.timeLeftTicks = this.survivalPhase === 'break' ? Math.max(0, this.survivalBreakEndTick - this.world.tick) : -1;
     }
     return base;
+  }
+
+  getMatchSummary(): Record<string, unknown> {
+    const players = [];
+    for (const eid of transformNetQuery(this.world)) {
+      const nid = NetId.value[eid]!;
+      players.push({
+        name: this.nameFor(nid),
+        bot: hasComponent(this.world, Bot, eid),
+        class: CLASS_IDS[Loadout.classId[eid]!] ?? 'assault',
+        team: Team.id[eid] ?? 0,
+        kills: Kills.count[eid] ?? 0,
+        deaths: Kills.deaths[eid] ?? 0,
+        score: Kills.score[eid] ?? 0,
+        damage: this.statDamage.get(nid) ?? 0,
+      });
+    }
+    return {
+      endedAt: new Date().toISOString(),
+      mode: this._mode,
+      map: this.mapId,
+      winner: this.winnerName,
+      matchPhase: this.matchPhase,
+      durationTicks: this.world.tick - this.matchStartTick,
+      config: { ...this.config },
+      teamScores: [...this.teamScores],
+      roundsWon: [...this.roundsWon],
+      weaponKills: Object.fromEntries(this.statKillWeapon),
+      players,
+    };
   }
 
   snapshotEntities(): EntitySnapshot[] {

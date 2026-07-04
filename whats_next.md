@@ -79,6 +79,13 @@ Sparks only appear at the shooter's tracer endpoint, not at the victim's body. T
 - **Corpse collision bug**: dead bodies kept their physics capsule server-side (client predicted through, server pushed back → rubber-band). `killEntity` now drops the capsule; respawn re-adds it. Verified: walking through a fresh corpse is perfectly smooth.
 - **New map "Warrens"**: corridor maze — ring corridor at ±18 with N/S doors, pinwheel core making spiral hallways, corner fights everywhere; 3 control points, 2 bomb sites (center + NE ring corner), per-map spawns in the outer corridor. Verified: door gaps clean, spawns clear, 600-tick bot match with nobody wall-stuck.
 
+## Resolved in Chosen mode + Ronin identity + LMG nerf + Stats (2026-07-04)
+- **New mode "The Chosen"** (FFA-like): every 20s a weighted-random living player becomes immortal for 10s. Past picks decay hard (weight 0.18^timesChosen) so the crown rotates — verified all 4 players anointed within 8 picks. Golden emissive pulse on the chosen model, server banner, HUD countdown ("⚡ YOU ARE THE CHOSEN"). Immunity lives in `damageEntity` (covers bullets, blasts, molotov).
+- **Ronin is an assassin now** (TF2-Spy pattern): melee **backstab** — knife strike from behind the victim (facing·direction > 0.45) deals ×2.4 (148, lethal to everyone); frontal stays flat 62. Kit: 105hp, 1.42 speed, 3 smokes to close distance, revolver sidearm. Not spammable: semi-auto 14-tick swings + positioning requirement.
+- **LMG nerfed per archetype research** (mobility-for-sustain tradeoff): 19dmg/5-tick (114 DPS), spread 0.06, reload 96, range 50; Heavy speed 0.84→0.80. Identity = 75-round suppression, not a laser hose.
+- **Match statistics**: `GameServer.getMatchSummary()` (mode/map/winner/duration/config/teamScores/rounds/per-player kills-deaths-score-damage-class-bot/weaponKills incl. 'explosive'); wsServer writes `stats/match-<ts>-<room>.json` once per ended match (+ abandoned matches with >30s of play on room close; `STATS_DIR` env, gitignored). Damage tracked in `damageEntity`, weapon kills at hitscan/AoE resolution — the data to balance from.
+- Fixed HUD fallthrough: firefight/blackout no longer show "Free practice".
+
 ## Next logical features (in priority order)
 
 1. **Lobby polish** — pre-game waiting room listing connected players before the host starts; today the host's room-setup dialog fills this role.

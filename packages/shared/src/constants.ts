@@ -40,9 +40,9 @@ export const WEAPON_RANGE = 60;
 
 export const MAX_VIEWPORT_ASPECT = 16 / 9;
 
-export type GameMode = 'ffa' | 'tdm' | 'gungame' | 'domination' | 'bomb' | 'survival' | 'practice' | 'firefight' | 'blackout';
+export type GameMode = 'ffa' | 'tdm' | 'gungame' | 'domination' | 'bomb' | 'survival' | 'practice' | 'firefight' | 'blackout' | 'chosen';
 
-export const GAME_MODES: GameMode[] = ['ffa', 'tdm', 'gungame', 'domination', 'bomb', 'survival', 'practice', 'firefight', 'blackout'];
+export const GAME_MODES: GameMode[] = ['ffa', 'tdm', 'gungame', 'domination', 'bomb', 'survival', 'practice', 'firefight', 'blackout', 'chosen'];
 
 export const MODE_NAMES: Record<GameMode, string> = {
   ffa: 'Free For All',
@@ -54,10 +54,19 @@ export const MODE_NAMES: Record<GameMode, string> = {
   practice: 'Practice Range',
   firefight: 'Firefight',
   blackout: 'Blackout',
+  chosen: 'The Chosen',
 };
 
 export const FOG_MODES: GameMode[] = ['blackout'];
-export const FFA_LIKE_MODES: GameMode[] = ['ffa', 'gungame', 'firefight', 'blackout'];
+export const FFA_LIKE_MODES: GameMode[] = ['ffa', 'gungame', 'firefight', 'blackout', 'chosen'];
+
+// The Chosen: every interval one player is anointed and becomes immortal for
+// the duration. Prior picks are heavily de-weighted so it rotates.
+export const CHOSEN_INTERVAL_TICKS = 30 * 20;
+export const CHOSEN_DURATION_TICKS = 30 * 10;
+export const CHOSEN_REPEAT_WEIGHT = 0.18;
+
+export const BACKSTAB_MULTIPLIER = 2.4;
 export const VISION_RADIUS = 18;
 
 export interface MatchConfig {
