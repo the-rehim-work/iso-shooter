@@ -76,6 +76,13 @@ import {
   ROUND_RESET_TICKS,
   SURVIVAL_BASE_ENEMIES,
   SURVIVAL_WAVE_BREAK_TICKS,
+  REGEN_DELAY_TICKS,
+  REGEN_INTERVAL_TICKS,
+  AMMO_PACK_RADIUS,
+  AMMO_PACK_RESPAWN_TICKS,
+  AMMO_PACK_ZONE_TYPE,
+  AMMO_PACK_SPOTS,
+  SPAWN_PROTECT_TICKS,
   FFA_SCORE_TARGET,
   FOG_MODES,
   FFA_LIKE_MODES,
@@ -233,6 +240,10 @@ export class GameServer {
   private survivalBreakEndTick = 0;
   private survivalSpawnedThisWave = 0;
 
+  private ammoPacks: { x: number; z: number; takenUntilTick: number }[] = [];
+  private lastHurtTick = new Map<number, number>();
+  private spawnProtectedUntil = new Map<number, number>();
+
   private banner = '';
   private gungameLadder: WeaponId[] = GUNGAME_LADDER.slice();
 
@@ -341,6 +352,9 @@ export class GameServer {
     this.survivalPhase = 'break';
     this.survivalBreakEndTick = this.world.tick + 30 * 3;
     this.survivalSpawnedThisWave = 0;
+    this.lastHurtTick.clear();
+    this.spawnProtectedUntil.clear();
+    this.initAmmoPacks();
 
     for (const netId of [...this.botEntities.keys()]) this.despawnBot(netId);
 
@@ -376,6 +390,18 @@ export class GameServer {
       this.survivalPhase = 'break';
       this.survivalBreakEndTick = 30 * 3;
     }
+    this.initAmmoPacks();
+  }
+
+  private initAmmoPacks(): void {
+    if (this._mode !== 'scavenger' || !this.physics) {
+      this.ammoPacks = [];
+      return;
+    }
+    this.ammoPacks = AMMO_PACK_SPOTS.map((p) => {
+      const spot = this.clearSpawn(p.x, p.z);
+      return { x: spot.x, z: spot.z, takenUntilTick: 0 };
+    });
   }
 
   private get map() {
@@ -590,6 +616,7 @@ export class GameServer {
     }
 
     this.netIdToEid.set(netId, eid);
+    this.spawnProtectedUntil.set(netId, this.world.tick + SPAWN_PROTECT_TICKS);
     return { eid, netId, team };
   }
 
@@ -663,6 +690,8 @@ export class GameServer {
     this.netIdToEid.delete(c.netId);
     this.names.delete(c.netId);
     this.posHistory.delete(c.netId);
+    this.lastHurtTick.delete(c.netId);
+    this.spawnProtectedUntil.delete(c.netId);
     this.clientRtt.delete(clientId);
     removeEntity(this.world, c.eid);
     this.clients.delete(clientId);
@@ -680,6 +709,8 @@ export class GameServer {
     this.netIdToEid.delete(netId);
     this.names.delete(netId);
     this.posHistory.delete(netId);
+    this.lastHurtTick.delete(netId);
+    this.spawnProtectedUntil.delete(netId);
     this.botEntities.delete(netId);
     this.botClass.delete(netId);
     this.botController.unregister(netId);
@@ -832,6 +863,7 @@ export class GameServer {
     if (prev <= 0) return false;
     const targetNetId = NetId.value[targetEid]!;
     if (this.isImmortal(targetNetId)) return false;
+    if (this.world.tick < (this.spawnProtectedUntil.get(targetNetId) ?? 0)) return false;
     if (shooterNetId !== targetNetId) {
       let log = this.damageLog.get(targetNetId);
       if (!log) { log = new Map(); this.damageLog.set(targetNetId, log); }
@@ -839,6 +871,7 @@ export class GameServer {
     }
     const next = Math.max(0, prev - dmg);
     Health.current[targetEid] = next;
+    this.lastHurtTick.set(targetNetId, this.world.tick);
     if (shooterNetId !== targetNetId) {
       this.statDamage.set(shooterNetId, (this.statDamage.get(shooterNetId) ?? 0) + (prev - next));
     }
@@ -941,6 +974,7 @@ export class GameServer {
     Transform.pitch[eid] = 0;
     Velocity.y[eid] = 0;
     Health.current[eid] = Health.max[eid]!;
+    this.spawnProtectedUntil.set(NetId.value[eid]!, this.world.tick + SPAWN_PROTECT_TICKS);
     this.resetWeapon(eid);
     if (this.physics) {
       const netId = NetId.value[eid]!;
@@ -1098,6 +1132,7 @@ export class GameServer {
     }
 
     if (this.bombPhase === 'planted') {
+      if (this.alivePlayersOnTeam(2) === 0) { this.endBombRound(tick, 1, 'DEFENDERS ELIMINATED'); return; }
       const s = sites[this.bombSiteIndex]!;
       let defusing = false;
       for (const eid of transformNetQuery(this.world)) {
@@ -1238,6 +1273,42 @@ export class GameServer {
     this.survivalSpawnedThisWave = count;
     for (let i = 0; i < count; i++) this.addBot();
     this.banner = 'WAVE ' + this.wave;
+  }
+
+  private updateScavenger(tick: number): void {
+    if (tick % REGEN_INTERVAL_TICKS === 0) {
+      for (const eid of transformNetQuery(this.world)) {
+        if (this.isDead(eid)) continue;
+        if (Health.current[eid]! >= Health.max[eid]!) continue;
+        const hurtAt = this.lastHurtTick.get(NetId.value[eid]!);
+        if (hurtAt !== undefined && tick - hurtAt < REGEN_DELAY_TICKS) continue;
+        Health.current[eid] = Health.current[eid]! + 1;
+      }
+    }
+    for (const pack of this.ammoPacks) {
+      if (tick < pack.takenUntilTick) continue;
+      for (const eid of transformNetQuery(this.world)) {
+        if (this.isDead(eid)) continue;
+        const dx = Transform.x[eid]! - pack.x, dz = Transform.z[eid]! - pack.z;
+        if (dx * dx + dz * dz > AMMO_PACK_RADIUS * AMMO_PACK_RADIUS) continue;
+        if (!this.grantReserveAmmo(eid)) continue;
+        pack.takenUntilTick = tick + AMMO_PACK_RESPAWN_TICKS;
+        break;
+      }
+    }
+  }
+
+  private grantReserveAmmo(eid: number): boolean {
+    const [w0, w1] = this.loadoutFor(eid);
+    const ws = this.readWeapon(eid);
+    const cap0 = w0.magSize * Math.max(0, w0.numMags - 1);
+    const cap1 = w1.magSize * Math.max(0, w1.numMags - 1);
+    const next0 = Math.min(cap0, ws.reserve0 + w0.magSize);
+    const next1 = Math.min(cap1, ws.reserve1 + w1.magSize);
+    if (next0 === ws.reserve0 && next1 === ws.reserve1) return false;
+    WeaponState.reserve0[eid] = next0;
+    WeaponState.reserve1[eid] = next1;
+    return true;
   }
 
   // weighted anointment: past picks decay hard so the crown moves around
@@ -1482,6 +1553,7 @@ export class GameServer {
       else if (this.mode === 'bomb') this.updateBomb(tick);
       else if (this.mode === 'survival') this.updateSurvival(tick);
       else if (this.mode === 'chosen') this.updateChosen(tick);
+      else if (this.mode === 'scavenger') this.updateScavenger(tick);
       this.checkWin(tick);
     }
 
@@ -1651,7 +1723,13 @@ export class GameServer {
   }
 
   getZones(): ZoneSnapshot[] {
-    return this.zones.map((z) => ({ id: z.id, type: z.type, x: z.x, z: z.z, radius: z.radius }));
+    const out: ZoneSnapshot[] = this.zones.map((z) => ({ id: z.id, type: z.type, x: z.x, z: z.z, radius: z.radius }));
+    for (let i = 0; i < this.ammoPacks.length; i++) {
+      const p = this.ammoPacks[i]!;
+      if (this.world.tick < p.takenUntilTick) continue;
+      out.push({ id: 100000 + i, type: AMMO_PACK_ZONE_TYPE, x: p.x, z: p.z, radius: AMMO_PACK_RADIUS });
+    }
+    return out;
   }
 
   consumeBlasts(): BlastEvent[] {

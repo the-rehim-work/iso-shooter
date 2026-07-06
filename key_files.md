@@ -11,7 +11,7 @@ metadata:
 
 | File | What it owns |
 |---|---|
-| `constants.ts` | Game constants + GameMode union (7 modes), MODE_NAMES, GAME_MODES, DOOR_OPEN_RADIUS, mode tuning (DOMINATION_SCORE_TARGET, CAPTURE_TICKS, BOMB_*, SURVIVAL_*, FFA_SCORE_TARGET) |
+| `constants.ts` | Game constants + GameMode union (11 modes), MODE_NAMES, GAME_MODES, DOOR_OPEN_RADIUS, mode tuning (DOMINATION_SCORE_TARGET, CAPTURE_TICKS, BOMB_*, SURVIVAL_*, FFA_SCORE_TARGET, REGEN_*/AMMO_PACK_* for scavenger, SPAWN_PROTECT_TICKS) |
 | `sim/weapons.ts` | WeaponDef + WEAPONS table (7), ClassDef + CLASSES (assault/scout/heavy), CLASS_IDS, GUNGAME_LADDER, WEAPON_ORDER, classIdToIndex/classFromIndex, weaponIdToIndex/weaponFromIndex |
 | `sim/maps.ts` | DoorDef, ZoneDef, GameMap; COMPOUND_MAP, EMPTY_MAP, DEFAULT_MAP, MAPS registry, getMap(id) |
 | `ecs/components.ts` | Transform, Velocity, NetId, Owner, ColliderHandle, Health, WeaponState (two-slot), Loadout (classId/speed), Team, Kills (count/deaths/score), Dead; tags Player/Bot/LocalPlayer/RemotePlayer |
@@ -42,7 +42,7 @@ metadata:
 | `render/scene.ts` | createScene(map) → { scene, doors: DoorView[], pointFills, pointRings }; cover/zones/bomb-site markers/lights; teamColor() |
 | `ui/classSelect.ts` | showClassSelect() class cards → ClassId; getSavedClass(); localStorage iso_player_class |
 | `render/isoCamera.ts` | createIsoCamera, resizeIsoCamera, moveCameraTarget, screenToGround, cameraGroundBasis, applyViewportCap |
-| `render/characterModel.ts` | CharacterModel — multi-part 3D character, walking/shoot/hit/death animations; muzzleWorldPos(x,z,yaw) static method |
+| `render/characterModel.ts` | CharacterModel — blocky Minecraft-style character (box limbs, pivot-joint animations), walking/shoot/hit/death; muzzleWorldPos(x,z,yaw) static method |
 | `render/entityView.ts` | EntityView — wraps CharacterModel, manages hit flash, death animation lifecycle, respawn |
 | `render/effects.ts` | EffectsSystem — muzzleFlash(pos), bulletTracer(from,to), hitSpark(pos), update(dt) |
 | `render/hud.ts` | Hud — DOM health bar, ammo counter, mode/score, kill feed (5s TTL), debug line |

@@ -183,14 +183,17 @@ export class BotController {
     const px = -nz * b.strafeDir;
     const pz = nx * b.strafeDir;
 
+    const closeInDist = Math.min(range * 0.62, 14);
+    const backOffDist = Math.min(range * 0.25, 4);
+
     let moveX: number;
     let moveZ: number;
     if (!los) {
       moveX = nx; moveZ = nz;
-    } else if (dist > range * 0.62) {
+    } else if (dist > closeInDist) {
       moveX = nx * 0.75 + px * 0.5;
       moveZ = nz * 0.75 + pz * 0.5;
-    } else if (dist < range * 0.3) {
+    } else if (dist < backOffDist) {
       moveX = -nx * 0.6 + px * 0.6;
       moveZ = -nz * 0.6 + pz * 0.6;
     } else {

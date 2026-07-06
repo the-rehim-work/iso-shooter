@@ -62,7 +62,6 @@ import {
 } from './render/isoCamera.js';
 import { EntityView } from './render/entityView.js';
 import { CharacterModel } from './render/characterModel.js';
-import { preloadSoldier } from './render/gltfCharacter.js';
 import { EffectsSystem } from './render/effects.js';
 import { InputSampler } from './input.js';
 import { Hud, type ScoreRow } from './render/hud.js';
@@ -83,7 +82,6 @@ const urlRoom = new URLSearchParams(location.search).get('room');
 let requestedRoom = urlRoom ? urlRoom.toUpperCase() : await showJoinRoom();
 
 await initRapier();
-await preloadSoldier();
 
 let gameMap = getMap('compound');
 let clientPhysics = new CollisionWorld(gameMap);
@@ -469,11 +467,11 @@ net.onMessage((dataStr) => {
         }
         predicted?.reconcile({ x: e.x, y: e.y, z: e.z, yaw: e.yaw, pitch: e.pitch, vy: e.vy }, msg.ackSeq);
         view.setState(e.x, e.y, e.z, e.yaw);
-        if (!e.isDead && wasDeadPrev) { view.respawn(); }
+        if (!e.isDead && (wasDeadPrev || view.isDead)) { view.respawn(); }
         else if (e.isDead && !wasDeadPrev) { view.triggerDeath(); audio.playDeath(); }
         else if (!e.isDead && e.health < prevHealth) view.hitFlash();
       } else {
-        const respawned = !e.isDead && wasDeadPrev;
+        const respawned = !e.isDead && (wasDeadPrev || view.isDead);
         let b = interp.get(e.netId);
         if (!b || respawned) { b = new InterpolationBuffer(); interp.set(e.netId, b); entityLastPos.delete(e.netId); }
         b.push(tMs, { x: e.x, y: e.y, z: e.z, yaw: e.yaw, pitch: e.pitch, vy: e.vy });

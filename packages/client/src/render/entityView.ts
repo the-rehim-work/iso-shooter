@@ -1,10 +1,9 @@
 import * as THREE from 'three';
 import { CharacterModel } from './characterModel.js';
-import { SoldierModel, soldierReady } from './gltfCharacter.js';
 
 export class EntityView {
   readonly mesh: THREE.Group;
-  private character: CharacterModel | SoldierModel;
+  private character: CharacterModel;
   private hitFlashUntilMs = 0;
   private wasDead = false;
   private chosen = false;
@@ -14,7 +13,7 @@ export class EntityView {
   private bodyColor: number;
 
   constructor(scene: THREE.Scene, color: number) {
-    this.character = soldierReady() ? new SoldierModel(color) : new CharacterModel(color);
+    this.character = new CharacterModel(color);
     this.bodyColor = color;
     this.mesh = this.character.root;
     scene.add(this.mesh);

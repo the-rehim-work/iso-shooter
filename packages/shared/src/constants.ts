@@ -40,9 +40,9 @@ export const WEAPON_RANGE = 60;
 
 export const MAX_VIEWPORT_ASPECT = 16 / 9;
 
-export type GameMode = 'ffa' | 'tdm' | 'gungame' | 'domination' | 'bomb' | 'survival' | 'practice' | 'firefight' | 'blackout' | 'chosen';
+export type GameMode = 'ffa' | 'tdm' | 'gungame' | 'domination' | 'bomb' | 'survival' | 'practice' | 'firefight' | 'blackout' | 'chosen' | 'scavenger';
 
-export const GAME_MODES: GameMode[] = ['ffa', 'tdm', 'gungame', 'domination', 'bomb', 'survival', 'practice', 'firefight', 'blackout', 'chosen'];
+export const GAME_MODES: GameMode[] = ['ffa', 'tdm', 'gungame', 'domination', 'bomb', 'survival', 'practice', 'firefight', 'blackout', 'chosen', 'scavenger'];
 
 export const MODE_NAMES: Record<GameMode, string> = {
   ffa: 'Free For All',
@@ -55,10 +55,24 @@ export const MODE_NAMES: Record<GameMode, string> = {
   firefight: 'Firefight',
   blackout: 'Blackout',
   chosen: 'The Chosen',
+  scavenger: 'Scavenger',
 };
 
 export const FOG_MODES: GameMode[] = ['blackout'];
-export const FFA_LIKE_MODES: GameMode[] = ['ffa', 'gungame', 'firefight', 'blackout', 'chosen'];
+export const FFA_LIKE_MODES: GameMode[] = ['ffa', 'gungame', 'firefight', 'blackout', 'chosen', 'scavenger'];
+
+export const REGEN_DELAY_TICKS = 30 * 3;
+export const REGEN_INTERVAL_TICKS = 2;
+export const AMMO_PACK_RADIUS = 1.2;
+export const AMMO_PACK_RESPAWN_TICKS = 30 * 12;
+export const AMMO_PACK_ZONE_TYPE = 4;
+export const AMMO_PACK_SPOTS: { x: number; z: number }[] = [
+  { x: 0, z: 0 },
+  { x: 14, z: 0 }, { x: -14, z: 0 }, { x: 0, z: 14 }, { x: 0, z: -14 },
+  { x: 20, z: 20 }, { x: -20, z: 20 }, { x: 20, z: -20 }, { x: -20, z: -20 },
+];
+
+export const SPAWN_PROTECT_TICKS = 15;
 
 // The Chosen: every interval one player is anointed and becomes immortal for
 // the duration. Prior picks are heavily de-weighted so it rotates.

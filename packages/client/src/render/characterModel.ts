@@ -1,4 +1,4 @@
-﻿import * as THREE from 'three';
+import * as THREE from 'three';
 
 function mkMesh(geo: THREE.BufferGeometry, mat: THREE.Material): THREE.Mesh {
   const m = new THREE.Mesh(geo, mat);
@@ -6,6 +6,15 @@ function mkMesh(geo: THREE.BufferGeometry, mat: THREE.Material): THREE.Mesh {
   m.receiveShadow = true;
   return m;
 }
+
+const HIP_Y = 0.78;
+const TORSO_H = 0.62;
+const TORSO_CENTER_Y = HIP_Y + TORSO_H / 2;
+const SHOULDER_LOCAL_Y = TORSO_H / 2 - 0.04;
+const HEAD_LOCAL_Y = TORSO_H / 2 + 0.19;
+const RIGHT_HOLD = -1.15;
+const LEFT_HOLD = -1.0;
+const LEFT_HOLD_Z = 0.42;
 
 export class CharacterModel {
   readonly root: THREE.Group;
@@ -43,72 +52,64 @@ export class CharacterModel {
   constructor(bodyColor: number) {
     this.root = new THREE.Group();
 
-    const bodyMat = new THREE.MeshStandardMaterial({ color: bodyColor, roughness: 0.78 });
+    const bodyMat = new THREE.MeshStandardMaterial({ color: bodyColor, roughness: 0.85 });
     this.bodyMat = bodyMat;
     const skinMat = new THREE.MeshStandardMaterial({ color: 0xffcc99, roughness: 0.9 });
-    const helmetMat = new THREE.MeshStandardMaterial({ color: 0x243040, roughness: 0.65 });
-    const visorMat = new THREE.MeshStandardMaterial({ color: 0x55aaff, roughness: 0.05, metalness: 0.9 });
+    const pantsMat = new THREE.MeshStandardMaterial({ color: 0x2c3138, roughness: 0.9 });
+    const eyeMat = new THREE.MeshStandardMaterial({ color: 0x22262c, roughness: 0.6 });
     const gunMat = new THREE.MeshStandardMaterial({ color: 0x383838, roughness: 0.35, metalness: 0.55 });
     const barrelMat = new THREE.MeshStandardMaterial({ color: 0x282828, roughness: 0.25, metalness: 0.8 });
 
-    // Legs
-    const legGeo = new THREE.CylinderGeometry(0.1, 0.085, 0.86, 8);
+    const legGeo = new THREE.BoxGeometry(0.19, HIP_Y, 0.22);
     this.lLeg = new THREE.Group();
-    this.lLeg.position.set(0.13, 0.88, 0);
-    const lLegM = mkMesh(legGeo, bodyMat);
-    lLegM.position.y = -0.43;
+    this.lLeg.position.set(0.115, HIP_Y, 0);
+    const lLegM = mkMesh(legGeo, pantsMat);
+    lLegM.position.y = -HIP_Y / 2;
     this.lLeg.add(lLegM);
 
     this.rLeg = new THREE.Group();
-    this.rLeg.position.set(-0.13, 0.88, 0);
-    const rLegM = mkMesh(legGeo, bodyMat);
-    rLegM.position.y = -0.43;
+    this.rLeg.position.set(-0.115, HIP_Y, 0);
+    const rLegM = mkMesh(legGeo, pantsMat);
+    rLegM.position.y = -HIP_Y / 2;
     this.rLeg.add(rLegM);
 
-    // Torso
     this.torsoGrp = new THREE.Group();
-    this.torsoGrp.position.set(0, 1.12, 0);
-    const torsoM = mkMesh(new THREE.BoxGeometry(0.44, 0.48, 0.24), bodyMat);
+    this.torsoGrp.position.set(0, TORSO_CENTER_Y, 0);
+    const torsoM = mkMesh(new THREE.BoxGeometry(0.46, TORSO_H, 0.26), bodyMat);
     this.torsoGrp.add(torsoM);
 
-    // Tactical vest detail
-    const vestM = mkMesh(new THREE.BoxGeometry(0.3, 0.28, 0.26), new THREE.MeshStandardMaterial({ color: 0x2a2a2a, roughness: 0.9 }));
-    vestM.position.set(0, 0.04, 0.001);
-    this.torsoGrp.add(vestM);
-
-    // Head
     this.headGrp = new THREE.Group();
-    this.headGrp.position.set(0, 0.33, 0);
-    const headM = mkMesh(new THREE.SphereGeometry(0.185, 8, 6), skinMat);
+    this.headGrp.position.set(0, HEAD_LOCAL_Y, 0);
+    const headM = mkMesh(new THREE.BoxGeometry(0.38, 0.38, 0.38), skinMat);
     this.headGrp.add(headM);
-    const helmetM = mkMesh(new THREE.SphereGeometry(0.205, 8, 4, 0, Math.PI * 2, 0, Math.PI * 0.54), helmetMat);
-    helmetM.position.y = 0.02;
-    this.headGrp.add(helmetM);
-    const visorM = mkMesh(new THREE.BoxGeometry(0.19, 0.05, 0.035), visorMat);
-    visorM.position.set(0, 0.01, 0.17);
-    this.headGrp.add(visorM);
+    const lEye = mkMesh(new THREE.BoxGeometry(0.07, 0.07, 0.02), eyeMat);
+    lEye.position.set(0.09, 0.03, 0.19);
+    this.headGrp.add(lEye);
+    const rEye = mkMesh(new THREE.BoxGeometry(0.07, 0.07, 0.02), eyeMat);
+    rEye.position.set(-0.09, 0.03, 0.19);
+    this.headGrp.add(rEye);
     this.torsoGrp.add(this.headGrp);
 
-    // Arms
-    const armGeo = new THREE.CylinderGeometry(0.07, 0.062, 0.46, 8);
+    const armGeo = new THREE.BoxGeometry(0.15, 0.62, 0.17);
     this.lArm = new THREE.Group();
-    this.lArm.position.set(0.26, 0.14, 0.04);
-    this.lArm.rotation.x = -0.2;
+    this.lArm.position.set(0.305, SHOULDER_LOCAL_Y, 0);
+    this.lArm.rotation.x = LEFT_HOLD;
+    this.lArm.rotation.z = LEFT_HOLD_Z;
     const lArmM = mkMesh(armGeo, bodyMat);
-    lArmM.position.y = -0.23;
+    lArmM.position.y = -0.27;
     this.lArm.add(lArmM);
     this.torsoGrp.add(this.lArm);
 
     this.rArm = new THREE.Group();
-    this.rArm.position.set(-0.26, 0.14, 0.04);
-    this.rArm.rotation.x = -0.38;
+    this.rArm.position.set(-0.305, SHOULDER_LOCAL_Y, 0);
+    this.rArm.rotation.x = RIGHT_HOLD;
     const rArmM = mkMesh(armGeo, bodyMat);
-    rArmM.position.y = -0.23;
+    rArmM.position.y = -0.27;
     this.rArm.add(rArmM);
 
-    // Gun
     this.gunPivot = new THREE.Group();
-    this.gunPivot.position.set(0.13, -0.1, 0.16);
+    this.gunPivot.position.set(0, -0.54, 0.06);
+    this.gunPivot.rotation.x = -RIGHT_HOLD;
 
     const gunBody = mkMesh(new THREE.BoxGeometry(0.068, 0.088, 0.36), gunMat);
     this.gunPivot.add(gunBody);
@@ -216,32 +217,32 @@ export class CharacterModel {
     this.recoil = 0;
     this.hitTime = 0;
     this.reloadTime = 0;
-    this.gunPivot.rotation.z = 0;
     this.walkPhase = 0;
     this.root.rotation.set(0, this.root.rotation.y, 0);
     this.root.position.y = 0;
-    this.torsoGrp.position.y = 1.12;
-    this.torsoGrp.position.x = 0;
-    this.torsoGrp.rotation.x = 0;
-    this.headGrp.position.x = 0;
-    this.headGrp.rotation.x = 0;
+    this.torsoGrp.position.set(0, TORSO_CENTER_Y, 0);
+    this.torsoGrp.rotation.set(0, 0, 0);
+    this.headGrp.position.set(0, HEAD_LOCAL_Y, 0);
+    this.headGrp.rotation.set(0, 0, 0);
+    this.lArm.rotation.set(LEFT_HOLD, 0, LEFT_HOLD_Z);
+    this.rArm.rotation.set(RIGHT_HOLD, 0, 0);
     this.lLeg.rotation.x = 0;
     this.rLeg.rotation.x = 0;
+    this.gunPivot.rotation.set(-RIGHT_HOLD, 0, 0);
   }
 
   update(dt: number, speed: number, airborne = false): void {
     if (this.dying) {
-      this.deadProgress = Math.min(1, this.deadProgress + dt * 2.2);
+      this.deadProgress = Math.min(1, this.deadProgress + dt * 2.4);
       const p = 1 - (1 - this.deadProgress) * (1 - this.deadProgress);
       this.root.rotation.x = p * Math.PI * 0.5;
-      this.root.rotation.z = this.deathRoll * p * 0.45;
-      this.root.position.y = -Math.sin(p * Math.PI * 0.5) * 0.5;
-      this.lArm.rotation.x = -0.2 + p * 1.0;
-      this.rArm.rotation.x = -0.38 + p * 0.8;
-      this.lLeg.rotation.x = p * 0.5;
-      this.rLeg.rotation.x = -p * 0.35;
-      this.headGrp.rotation.x = p * 0.55;
-      this.torsoGrp.position.y = 1.12 - p * 0.2;
+      this.root.rotation.z = this.deathRoll * p * 0.35;
+      this.root.position.y = -Math.sin(p * Math.PI * 0.5) * 0.55;
+      this.lArm.rotation.x = LEFT_HOLD + p * 1.4;
+      this.rArm.rotation.x = RIGHT_HOLD + p * 1.4;
+      this.lLeg.rotation.x = 0;
+      this.rLeg.rotation.x = 0;
+      this.headGrp.rotation.x = p * 0.4;
       return;
     }
     this.root.rotation.x = 0;
@@ -249,50 +250,46 @@ export class CharacterModel {
     this.root.position.y = 0;
 
     if (airborne) {
-      // jump pose: legs tucked, off-hand out for balance
-      this.lLeg.rotation.x = -0.7;
-      this.rLeg.rotation.x = 0.45;
-      this.lArm.rotation.x = -0.75;
-      this.torsoGrp.position.y = 1.12;
+      this.lLeg.rotation.x = -0.55;
+      this.rLeg.rotation.x = 0.4;
+      this.torsoGrp.position.y = TORSO_CENTER_Y;
+      this.torsoGrp.rotation.z = 0;
     } else {
       const moving = speed > 0.08;
-      if (moving) this.walkPhase += dt * Math.max(speed, 0.8) * 3.0;
+      if (moving) this.walkPhase += dt * Math.max(speed, 0.8) * 2.6;
 
-      const sw = Math.sin(this.walkPhase) * (moving ? 0.3 : 0);
+      const sw = moving ? Math.sin(this.walkPhase) * 0.72 : 0;
       this.lLeg.rotation.x = sw;
       this.rLeg.rotation.x = -sw;
-      this.lArm.rotation.x = -0.2 - sw * 0.38;
 
-      const bob = moving ? Math.abs(Math.sin(this.walkPhase)) * 0.032 : 0;
-      this.torsoGrp.position.y = 1.12 + bob;
+      const bob = moving ? Math.abs(Math.sin(this.walkPhase)) * 0.045 : 0;
+      this.torsoGrp.position.y = TORSO_CENTER_Y + bob;
+      this.torsoGrp.rotation.z = moving ? Math.sin(this.walkPhase) * 0.045 : 0;
     }
 
     this.recoil = Math.max(0, this.recoil - dt * 9);
-    this.gunPivot.position.z = 0.16 - this.recoil * 0.1;
-    this.rArm.rotation.x = -0.38 + this.recoil * 0.25;
-    this.gunPivot.rotation.x = 0;
+    this.rArm.rotation.x = RIGHT_HOLD + this.recoil * 0.3;
+    this.gunPivot.position.z = 0.06 - this.recoil * 0.08;
+    this.lArm.rotation.x = LEFT_HOLD + this.recoil * 0.18;
 
     if (this.swingTime > 0) {
-      // knife swing: raise back, slash through, recover — matches the 14-tick cadence
       this.swingTime = Math.max(0, this.swingTime - dt);
       const p = 1 - this.swingTime / 0.42;
       let arm: number;
-      if (p < 0.3) arm = -0.38 + (p / 0.3) * 0.6;
-      else if (p < 0.7) arm = 0.22 - ((p - 0.3) / 0.4) * 1.9;
-      else arm = -1.68 + ((p - 0.7) / 0.3) * 1.3;
+      if (p < 0.3) arm = RIGHT_HOLD - (p / 0.3) * 0.9;
+      else if (p < 0.7) arm = RIGHT_HOLD - 0.9 + ((p - 0.3) / 0.4) * 1.6;
+      else arm = RIGHT_HOLD + 0.7 - ((p - 0.7) / 0.3) * 0.7;
       this.rArm.rotation.x = arm;
-      this.gunPivot.rotation.x = (arm + 0.38) * 0.8;
     }
 
     if (this.reloadTime > 0) {
       this.reloadTime -= dt;
       const p = 1 - Math.max(0, this.reloadTime) / this.reloadDur;
       const tilt = Math.sin(p * Math.PI);
-      this.rArm.rotation.x = -0.38 - tilt * 0.55;
-      this.lArm.rotation.x = -0.2 - tilt * 0.35;
+      this.lArm.rotation.x = LEFT_HOLD + tilt * 0.85;
       const magOut = Math.sin(Math.min(1, p * 1.6) * Math.PI);
       this.gunMag.position.y = -0.097 - magOut * 0.16;
-      this.gunPivot.rotation.z = tilt * 0.25;
+      this.gunPivot.rotation.z = tilt * 0.3;
     } else {
       this.gunMag.position.y = -0.097;
       this.gunPivot.rotation.z = 0;
@@ -302,9 +299,9 @@ export class CharacterModel {
       this.hitTime -= dt;
       const s = this.hitTime / 0.3;
       const r = Math.random() - 0.5;
-      this.torsoGrp.rotation.x = -0.28 * s;
-      this.torsoGrp.position.x = r * 0.07 * s;
-      this.headGrp.position.x = r * 0.1 * s;
+      this.torsoGrp.rotation.x = -0.22 * s;
+      this.torsoGrp.position.x = r * 0.06 * s;
+      this.headGrp.position.x = r * 0.09 * s;
     } else {
       this.torsoGrp.rotation.x = 0;
       this.torsoGrp.position.x = 0;

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { THROW_FRAG, THROW_MOLOTOV, THROW_SMOKE, type ProjectileSnapshot, type ZoneSnapshot } from '@iso/shared';
+import { THROW_FRAG, THROW_MOLOTOV, THROW_SMOKE, AMMO_PACK_ZONE_TYPE, type ProjectileSnapshot, type ZoneSnapshot } from '@iso/shared';
 
 function radialSprite(inner: string, outer: string): THREE.SpriteMaterial {
   const c = document.createElement('canvas');
@@ -108,11 +108,51 @@ class SmokeZone {
   }
 }
 
+const CRATE_GEO = new THREE.BoxGeometry(0.55, 0.4, 0.55);
+const CRATE_MAT = new THREE.MeshStandardMaterial({ color: 0x3f4a2a, roughness: 0.7, metalness: 0.2 });
+const CRATE_LID_GEO = new THREE.BoxGeometry(0.42, 0.12, 0.28);
+const CRATE_LID_MAT = new THREE.MeshStandardMaterial({ color: 0xe6b800, roughness: 0.4, emissive: 0x554000 });
+
+class AmmoCrate {
+  readonly group = new THREE.Group();
+  private t = Math.random() * Math.PI * 2;
+
+  constructor(scene: THREE.Scene, x: number, z: number, radius: number) {
+    const box = new THREE.Mesh(CRATE_GEO, CRATE_MAT);
+    box.castShadow = true;
+    box.position.y = 0.45;
+    this.group.add(box);
+    const lid = new THREE.Mesh(CRATE_LID_GEO, CRATE_LID_MAT);
+    lid.position.y = 0.71;
+    this.group.add(lid);
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(radius - 0.08, radius, 26),
+      new THREE.MeshBasicMaterial({ color: 0xe6b800, transparent: true, opacity: 0.4, depthWrite: false, side: THREE.DoubleSide }),
+    );
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.y = 0.04;
+    this.group.add(ring);
+    this.group.position.set(x, 0, z);
+    scene.add(this.group);
+  }
+
+  update(dt: number): void {
+    this.t += dt;
+    this.group.rotation.y += dt * 1.4;
+    this.group.position.y = Math.sin(this.t * 2.4) * 0.08;
+  }
+
+  dispose(scene: THREE.Scene): void {
+    scene.remove(this.group);
+  }
+}
+
 export class ThrowablesView {
   private scene: THREE.Scene;
   private projMeshes = new Map<number, THREE.Mesh>();
   private fireZones = new Map<number, FireZone>();
   private smokeZones = new Map<number, SmokeZone>();
+  private ammoCrates = new Map<number, AmmoCrate>();
   private flameMat = radialSprite('rgba(255,220,120,1)', 'rgba(255,80,0,0)');
   private smokeMat = radialSprite('rgba(150,150,155,0.9)', 'rgba(120,120,125,0)');
 
@@ -137,6 +177,7 @@ export class ThrowablesView {
   syncZones(list: ZoneSnapshot[]): void {
     const seenFire = new Set<number>();
     const seenSmoke = new Set<number>();
+    const seenAmmo = new Set<number>();
     for (const z of list) {
       if (z.type === THROW_MOLOTOV) {
         seenFire.add(z.id);
@@ -144,14 +185,19 @@ export class ThrowablesView {
       } else if (z.type === THROW_SMOKE) {
         seenSmoke.add(z.id);
         if (!this.smokeZones.has(z.id)) this.smokeZones.set(z.id, new SmokeZone(this.scene, z.x, z.z, z.radius, this.smokeMat));
+      } else if (z.type === AMMO_PACK_ZONE_TYPE) {
+        seenAmmo.add(z.id);
+        if (!this.ammoCrates.has(z.id)) this.ammoCrates.set(z.id, new AmmoCrate(this.scene, z.x, z.z, z.radius));
       }
     }
     for (const [id, z] of this.fireZones) if (!seenFire.has(id)) { z.dispose(this.scene); this.fireZones.delete(id); }
     for (const [id, z] of this.smokeZones) if (!seenSmoke.has(id)) { z.dispose(this.scene); this.smokeZones.delete(id); }
+    for (const [id, z] of this.ammoCrates) if (!seenAmmo.has(id)) { z.dispose(this.scene); this.ammoCrates.delete(id); }
   }
 
   update(dt: number): void {
     for (const z of this.fireZones.values()) z.update(dt);
     for (const z of this.smokeZones.values()) z.update(dt);
+    for (const z of this.ammoCrates.values()) z.update(dt);
   }
 }
